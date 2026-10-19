@@ -1,16 +1,21 @@
 /*
  * ViewViewView dual-pane widget styles — ARCHITECTURE.md §4.4.
  *
- * anywidget injects this file into the widget shadow root, so palette tokens
- * are declared on `:host` to stay isolated to this component, and every
- * visible element carries a `.vvv-` class prefix.
+ * Palette tokens are declared on `.vvv-root` rather than `:host`: anywidget
+ * may inject this stylesheet into the light DOM (ipywidgets fallback) where
+ * `:host` never matches. `.vvv-root` exists in both rendering modes, so the
+ * dark palette and the white/neon-green colors are identical in JupyterLab,
+ * Voilà and the standalone preview page.
  *
- * Palette: Deephaven dark-tone approximation — near-black surfaces, soft
- * off-white foreground, blue accent, low saturation overall (decision D5).
- * Hex values follow §4.4 verbatim (allowed micro-tuning was not needed).
+ * Palette: Deephaven dark-tone approximation — near-black surfaces, pure white
+ * field text, neon-green count values (decisions D5/D10).
  */
 
 :host {
+  display: block;
+}
+
+.vvv-root {
   --vvv-bg: #1c2126;
   --vvv-panel: #232931;
   --vvv-header: #2b323a;
@@ -25,28 +30,19 @@
   background: var(--vvv-bg);
   box-sizing: border-box;
   color: var(--vvv-fg);
-  display: block;
+  display: flex;
+  flex-direction: column;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
     Arial, "Microsoft YaHei", sans-serif;
   font-size: 13px;
+  gap: 10px;
   height: 100%;
   line-height: 1.45;
   max-height: 640px;
   min-height: 320px;
+  padding: 10px 12px;
   scrollbar-color: var(--vvv-border) transparent;
   scrollbar-width: thin;
-}
-
-/* Two-pane layout: counts pane ≈150px caps, detail pane fills the remainder. */
-.vvv-root {
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  height: 100%;
-  max-height: 640px;
-  min-height: 320px;
-  padding: 10px 12px;
 }
 
 .vvv-pane {
@@ -123,14 +119,6 @@
   );
 }
 
-/* While dragging a divider: signal resize + stop text selection inside the
-   widget (shadow-DOM scoped, so document-level body rules would not apply). */
-.vvv-root--resizing,
-.vvv-root--resizing * {
-  cursor: col-resize !important;
-  user-select: none !important;
-}
-
 .vvv-th--num {
   text-align: right;
 }
@@ -200,4 +188,12 @@
   display: inline-block;
   height: 6px;
   width: 6px;
+}
+
+/* While dragging a divider: signal resize + stop text selection inside the
+   widget (shadow-DOM scoped, so document-level body rules would not apply). */
+.vvv-root--resizing,
+.vvv-root--resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }

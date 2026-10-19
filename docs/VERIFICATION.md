@@ -61,6 +61,15 @@
 
 效果图：`dev/demo-empty.png`（空表骨架）、`dev/demo-live.png`（真实运行）、`dev/demo-resize.png`（列宽拖拽）、`dev/demo-gallery.png`（三图总览）。
 
+## JupyterLab 实机验证（2026-10-19）
+
+在 JupyterLab 4.6.4 + ipywidgets 8.1.9 + anywidget 0.11.0 中实际执行 `dev/jupyter_demo.ipynb`（800 次注入），双窗、荧光绿计数、列宽拖拽均正常，截图见 `dev/jupyter-live.png`。此轮验证发现并修复了两个**仅在 Jupyter 环境暴露**的问题：
+
+1. **anywidget 默认导出契约**：必须是 `export default { render }`；写成 `export default function render(...)` 时 anywidget 会以无参调用，前端报 `Cannot destructure property 'model' of 'undefined'`，widget 完全不渲染。已在 `index.mjs` 修正并加测试断言。
+2. **样式挂载位置**：anywidget 在 JupyterLab 中可能把 `_css` 注入普通 DOM（而非 shadow root），`:host` 上的 CSS 变量不生效，导致白底黑字。配色 tokens 已从 `:host` 移到 `.vvv-root`，两种挂载方式下都保持深色 + 白字 + 荧光绿计数。
+
+复现：`python scripts/capture_jupyter.py`（需要本地 JupyterLab 与 Edge）。
+
 ## 已知限制（均为契约内有意设计）
 
 1. 多个 `show()` 面板共享“最后一次 show 的分类列与窗口深度”；FaultViz 亦以最后一次显示为准。

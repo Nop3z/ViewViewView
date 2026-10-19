@@ -178,6 +178,7 @@ python -m pytest -q                     # 61 项契约/一致性/压测测试
 python scripts/smoke_core.py            # 15 项 M1 验收自检
 python scripts/build_preview.py         # 由前端源码重新生成 dev/preview.html
 python scripts/build_demo.py            # 真实核心跑 5000 次注入，生成 dev/demo.html + 效果图素材
+python scripts/capture_jupyter.py       # 在真实 JupyterLab 中执行 notebook 并截图（需本机 Edge）
 ```
 
 无需 Jupyter 即可预览界面：用浏览器直接打开 [`dev/preview.html`](dev/preview.html)（深色双窗样张，含模拟载荷、“模拟推送”按钮与列宽拖拽）。访问 `dev/preview.html?resize` 会自动合成一次列宽拖拽，便于截图验收。

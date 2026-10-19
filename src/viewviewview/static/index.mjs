@@ -24,7 +24,7 @@ const MIN_COLUMN_WIDTH = 56;
  * @param {HTMLElement} el Shadow-DOM element owned by anywidget.
  * @returns {() => void} Teardown function, called by anywidget on view removal.
  */
-export default function render({ model, el }) {
+function render({ model, el }) {
   const root = document.createElement("div");
   root.className = "vvv-root";
   applyTheme(root, model.get("theme"));
@@ -427,3 +427,8 @@ function clearChildren(node) {
     node.removeChild(node.firstChild);
   }
 }
+
+// anywidget contract: the default export is a view definition object whose
+// ``render`` method receives ``{ model, el }``. Exporting a bare function here
+// makes anywidget invoke it without arguments and breaks model initialisation.
+export default { render };
