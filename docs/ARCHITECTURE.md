@@ -19,6 +19,7 @@
   - D9 CSV 默认文件名 = 控件创建（实验开始）时刻：`YYYYMMDD-HHMMSS.csv`，同名冲突追加 `-1`；仍支持 `csv_path=` 手动命名（自动创建父目录）。
   - D10 视觉：深色主题；字段文字纯白 `#ffffff`，上窗计数值荧光绿 `#39ff14`（FaultViz 观感）。
   - D11 列宽可拖拽：拖动表头分隔线调整列宽；相邻两列分担增量，最后一列向右扩展表格（容器横向滚动）。宽度按表（统计表/明细表）保存在视图状态中，跨实时刷新保持；拖拽期间暂缓 payload 重绘，释放后立即补上最新快照。
+  - D12 紧凑列布局：表格默认按内容宽度排列（`width: max-content`，不再拉伸到面板整宽），上窗 `state` 与 `count` 相邻、明细各列紧贴（对齐 FaultViz 观感）；拖动表头分隔线在此基础上微调列宽。
 - 参考工具链：核心依赖仅 `anywidget`；`pygwalker`/`pandas` 仅 plot 路径使用（extras）；打包 hatchling。
 
 ## 1. 包结构与文件所有权矩阵（防并行冲突）
@@ -118,7 +119,7 @@ flush 语义：每 `flush_every` 条 pending 后自动 `flush()`；`flush()` 刷
 CSV 值类型：int/float 原样，str 原样；`state_key` 对应列值以 `str()` 强转为 key。
 
 ### 4.4 前端规格 — B 实现（Deephaven 深色基调）
-- 布局：单容器两窗。上窗“分类统计”（表头 `state 桶 | count`，高度自适应≈150px），下窗明细（schema 列，sticky 表头，斑马纹，最新行置顶）。数字等宽 `font-variant-numeric: tabular-nums`。
+- 布局：单容器两窗。表格**按内容紧凑排列**（不撑满面板，`state` 与 `count` 相邻，明细列紧贴），上窗“分类统计”（表头 `state 桶 | count`，高度自适应≈150px），下窗明细（schema 列，sticky 表头，斑马纹，最新行置顶）。数字等宽 `font-variant-numeric: tabular-nums`。
 - 主题 tokens（styles.css `:host` 变量，Deephaven 深色近似）：`--vvv-bg:#1c2126; --vvv-panel:#232931; --vvv-header:#2b323a; --vvv-row-alt:#20252b; --vvv-fg:#ffffff; --vvv-fg-dim:#8b95a1; --vvv-accent:#3d6fe0; --vvv-border:#333b45; --vvv-live:#2ea043; --vvv-count:#39ff14;`。字段文字使用纯白，上窗“计数”列使用荧光绿（`--vvv-count`）并加粗；允许微调，但保持深色、白字、荧光绿计数基调。
 - DOM 构造**只用 textContent/createElement**，禁 innerHTML（载荷字符串不可信 = 防注入）。
 - 列宽拖拽（D11）：每个 `<th>` 右侧带 8px `col-resize` 手柄；首次拖拽冻结当前列宽（`table-layout: fixed` + `<colgroup>` 像素宽度），相邻列分担增量、末列扩展表格；宽度按表存储在视图状态（`counts` / `detail`），实时重绘后自动恢复；拖拽期间挂起重绘，`pointerup` 后补最新帧。拖拽时给根节点加 `vvv-root--resizing`（shadow DOM 内锁定 `col-resize` 光标与禁止选中）。
