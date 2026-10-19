@@ -73,6 +73,10 @@ ignore = [
     "SIM115",
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# The demo builder embeds long HTML/JS template lines on purpose.
+"scripts/build_demo.py" = ["E501"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

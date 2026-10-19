@@ -48,6 +48,19 @@
 
 列宽拖拽通过 `dev/preview.html?resize` 在真实浏览器中合成一次拖拽后截图验证：`state` 列收窄、`delay` 列同步加宽，表头分隔线可见；宽度在重绘后保留。`dev/preview.html` 由 `scripts/build_preview.py` 从 `index.mjs`/`styles.css` 生成，避免预览页与源码漂移。
 
+## 真实核心演示（`python scripts/build_demo.py --rows 5000`）
+
+用真实 `ViewWidget`（`columns=` 预声明、CSV 落盘、环形窗口）跑 5000 次模拟注入，捕获实际发给前端的 payload 后渲染截图：
+
+| 指标 | 实测 |
+| --- | --- |
+| 注入耗时 | 0.019 s |
+| CSV | 95 135 字节 / 5 000 行 |
+| 分类计数 | PASS 4 461 / FAIL 436 / TIMEOUT 103 |
+| 明细窗口 | 1 000 行（`live_rows=1000`） |
+
+效果图：`dev/demo-empty.png`（空表骨架）、`dev/demo-live.png`（真实运行）、`dev/demo-resize.png`（列宽拖拽）、`dev/demo-gallery.png`（三图总览）。
+
 ## 已知限制（均为契约内有意设计）
 
 1. 多个 `show()` 面板共享“最后一次 show 的分类列与窗口深度”；FaultViz 亦以最后一次显示为准。
