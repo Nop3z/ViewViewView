@@ -32,8 +32,10 @@ def test_panel_bundles_esm_and_css():
     panel = VvvPanel(payload=PAYLOAD)
     assert "renderPayload" in panel._esm
     assert "export default" in panel._esm
+    assert "vvv-resize" in panel._esm
     assert "--vvv-bg" in panel._css
     assert "--vvv-panel" in panel._css
+    assert "vvv-table--fixed" in panel._css
 
 
 def test_panel_default_payload_is_empty():

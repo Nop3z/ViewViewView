@@ -4,13 +4,18 @@
  *
  * Injection guard (§4.4): payload strings are untrusted user data, so the DOM
  * is built exclusively with createElement/textContent — innerHTML is banned.
+ *
+ * Column widths: drag the divider on a header cell. Neighbouring columns share
+ * the delta (Excel style); dragging the last column widens the table and the
+ * pane scrolls horizontally. Widths survive live payload re-renders (kept in
+ * the per-view layout state) and are stored per table ("counts" / "detail").
  */
+
+const MIN_COLUMN_WIDTH = 56;
 
 /**
  * Default anywidget entry point: render the current payload snapshot and keep
  * the DOM in sync with subsequent `change:payload` / `change:theme` pushes.
- * All rendering is a bounded full redraw (<=200 rows) via DocumentFragment.
- *
  * @param {{
  *   get: (key: string) => unknown,
  *   on: (name: string, callback: () => void) => void,
@@ -24,9 +29,27 @@ export default function render({ model, el }) {
   root.className = "vvv-root";
   applyTheme(root, model.get("theme"));
   el.appendChild(root);
-  renderPayload(root, model.get("payload"));
 
-  const onPayloadChange = () => renderPayload(root, model.get("payload"));
+  const layout = {
+    counts: new Map(), // column-width array for the counts table
+    detail: new Map(), // column-width array for the detail table
+    dragging: false,
+    pending: false,
+  };
+  const ctx = { layout, redraw: () => draw(model.get("payload")) };
+  const draw = (payload) => renderPayload(root, payload, ctx);
+
+  draw(model.get("payload"));
+
+  const onPayloadChange = () => {
+    // A live frame must not destroy the DOM under an active drag; replay the
+    // latest snapshot as soon as the pointer is released.
+    if (layout.dragging) {
+      layout.pending = true;
+      return;
+    }
+    draw(model.get("payload"));
+  };
   const onThemeChange = () => applyTheme(root, model.get("theme"));
   model.on("change:payload", onPayloadChange);
   model.on("change:theme", onThemeChange);
@@ -44,9 +67,10 @@ export default function render({ model, el }) {
  * absent/partial while the widget is being wired, so every access is defensive.
  * @param {HTMLElement} root
  * @param {unknown} payload
+ * @param {{ layout: object, redraw: () => void }} ctx
  * @returns {void}
  */
-function renderPayload(root, payload) {
+function renderPayload(root, payload, ctx) {
   clearChildren(root);
   const columns = readColumns(payload);
   const counts = readCounts(payload);
@@ -58,13 +82,13 @@ function renderPayload(root, payload) {
   }
 
   const stateKey = readStateKey(payload);
-  root.appendChild(buildCountsPane(stateKey, counts));
+  root.appendChild(buildCountsPane(stateKey, counts, ctx));
 
   // §3.2 limit=0 → counts-only payload (no detail pane); rows arrive
   // newest-first already (§4.3), so render them in array order as-is.
   // Declared columns render even before the first record (empty tbody).
   if (columns.length > 0) {
-    root.appendChild(buildDetailPane(columns, rows));
+    root.appendChild(buildDetailPane(columns, rows, ctx));
   }
 
   root.appendChild(buildFooter(payload, rows));
@@ -108,15 +132,16 @@ function readStateKey(payload) {
  * Top pane: category statistics. No state column → graceful empty state.
  * @param {string | null} stateKey
  * @param {Record<string, unknown>} counts
+ * @param {{ layout: object, redraw: () => void }} ctx
  * @returns {HTMLElement}
  */
-function buildCountsPane(stateKey, counts) {
+function buildCountsPane(stateKey, counts, ctx) {
   const pane = document.createElement("section");
   pane.className = "vvv-pane vvv-pane--counts";
   if (stateKey === null) {
     pane.appendChild(buildNote("No state column"));
   } else {
-    pane.appendChild(buildCountsTable(stateKey, counts));
+    pane.appendChild(buildCountsTable(stateKey, counts, ctx));
   }
   return pane;
 }
@@ -124,10 +149,12 @@ function buildCountsPane(stateKey, counts) {
 /**
  * Top pane table: one row per state bucket, header `[state_key | count]`.
  * Bucket order = payload dict order (no re-sorting; see OPEN_QUESTIONS B2).
+ * @returns {HTMLElement}
  */
-function buildCountsTable(stateKey, counts) {
+function buildCountsTable(stateKey, counts, ctx) {
   const table = document.createElement("table");
   table.className = "vvv-table vvv-table--counts";
+  table.appendChild(createColgroup(2));
   table.appendChild(buildTableHead([stateKey, "count"], [false, true]));
   const tbody = document.createElement("tbody");
   for (const [bucket, count] of Object.entries(counts)) {
@@ -143,6 +170,7 @@ function buildCountsTable(stateKey, counts) {
     tbody.appendChild(tr);
   }
   table.appendChild(tbody);
+  enableColumnResize(table, ctx, "counts");
   return table;
 }
 
@@ -150,17 +178,18 @@ function buildCountsTable(stateKey, counts) {
  * Bottom pane table: schema columns in payload order, rows newest-first.
  * @returns {HTMLElement}
  */
-function buildDetailPane(columns, rows) {
+function buildDetailPane(columns, rows, ctx) {
   const pane = document.createElement("section");
   pane.className = "vvv-pane vvv-pane--detail";
-  pane.appendChild(buildDetailTable(columns, rows));
+  pane.appendChild(buildDetailTable(columns, rows, ctx));
   return pane;
 }
 
 /** Header cells `int|float` → right-aligned, `str` → left-aligned. */
-function buildDetailTable(columns, rows) {
+function buildDetailTable(columns, rows, ctx) {
   const table = document.createElement("table");
   table.className = "vvv-table vvv-table--detail";
+  table.appendChild(createColgroup(columns.length));
   table.appendChild(
     buildTableHead(
       columns.map((column) => column.name),
@@ -180,7 +209,17 @@ function buildDetailTable(columns, rows) {
     tbody.appendChild(tr);
   }
   table.appendChild(tbody);
+  enableColumnResize(table, ctx, "detail");
   return table;
+}
+
+/** @returns {HTMLTableColElement} Empty colgroup used for explicit widths. */
+function createColgroup(count) {
+  const colgroup = document.createElement("colgroup");
+  for (let index = 0; index < count; index += 1) {
+    colgroup.appendChild(document.createElement("col"));
+  }
+  return colgroup;
 }
 
 /** @returns {HTMLElement} Sticky table head for `labels`. */
@@ -196,6 +235,134 @@ function buildTableHead(labels, numeric) {
   });
   thead.appendChild(tr);
   return thead;
+}
+
+/**
+ * Restore previously dragged widths and attach one resize handle per header.
+ * @param {HTMLTableElement} table
+ * @param {{ layout: object, redraw: () => void }} ctx
+ * @param {"counts" | "detail"} storeKey
+ */
+function enableColumnResize(table, ctx, storeKey) {
+  const colgroup = table.querySelector("colgroup");
+  const widths = ctx.layout[storeKey].get(storeKey);
+  if (widths && widths.length === colgroup.children.length) {
+    applyWidths(table, colgroup, widths);
+  }
+  const headers = Array.from(table.querySelectorAll("thead th"));
+  headers.forEach((header, index) => {
+    header.appendChild(buildResizeHandle(table, colgroup, index, ctx, storeKey));
+  });
+}
+
+/** @returns {HTMLSpanElement} Draggable divider on a header cell. */
+function buildResizeHandle(table, colgroup, index, ctx, storeKey) {
+  const handle = document.createElement("span");
+  handle.className = "vvv-resize";
+  handle.title = "拖动调整列宽";
+  handle.setAttribute("role", "separator");
+  handle.setAttribute("aria-orientation", "vertical");
+  handle.setAttribute("aria-label", "调整列宽");
+  handle.addEventListener("pointerdown", (event) => {
+    startColumnResize(event, table, colgroup, index, ctx, storeKey, handle);
+  });
+  return handle;
+}
+
+/** Apply an explicit width array to a table and freeze its layout. */
+function applyWidths(table, colgroup, widths) {
+  table.classList.add("vvv-table--fixed");
+  let total = 0;
+  Array.from(colgroup.children).forEach((col, index) => {
+    col.style.width = `${widths[index]}px`;
+    total += widths[index];
+  });
+  table.style.width = `${total}px`;
+}
+
+/** Toggle the root-level resize flag (shadow-DOM scoped cursor/selection lock). */
+function setRootResizing(handle, active) {
+  const root = handle.closest(".vvv-root");
+  if (root) {
+    root.classList.toggle("vvv-root--resizing", active);
+  }
+}
+
+/**
+ * Excel-style resize: the dragged divider widens one column and narrows the
+ * next; the last column expands the table (horizontal scroll in the pane).
+ */
+function startColumnResize(event, table, colgroup, index, ctx, storeKey, handle) {  if (event.button !== 0) {
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+
+  const store = ctx.layout[storeKey];
+  const headers = Array.from(table.querySelectorAll("thead th"));
+  if (headers.length === 0) {
+    return;
+  }
+  const widths = headers.map((header) => header.getBoundingClientRect().width);
+  const total = widths.reduce((sum, width) => sum + width, 0);
+  applyWidths(table, colgroup, widths);
+
+  ctx.layout.dragging = true;
+  setRootResizing(handle, true);
+  handle.classList.add("vvv-resize--active");
+  if (typeof handle.setPointerCapture === "function") {
+    try {
+      handle.setPointerCapture(event.pointerId);
+    } catch {
+      /* stale pointer id: drag still works through the document listeners */
+    }
+  }
+
+  const startX = event.clientX;
+  const startLeft = widths[index];
+  const hasNeighbour = index < widths.length - 1;
+  const startRight = hasNeighbour ? widths[index + 1] : 0;
+  let lastWidths = widths.slice();
+
+  const onMove = (moveEvent) => {
+    const delta = moveEvent.clientX - startX;
+    if (hasNeighbour) {
+      const left = startLeft + delta;
+      const right = startRight - delta;
+      if (left < MIN_COLUMN_WIDTH || right < MIN_COLUMN_WIDTH) {
+        return;
+      }
+      widths[index] = left;
+      widths[index + 1] = right;
+      table.style.width = `${total}px`;
+    } else {
+      const next = Math.max(MIN_COLUMN_WIDTH, startLeft + delta);
+      widths[index] = next;
+      table.style.width = `${total + (next - startLeft)}px`;
+    }
+    Array.from(colgroup.children).forEach((col, i) => {
+      col.style.width = `${widths[i]}px`;
+    });
+    lastWidths = widths.slice();
+  };
+
+  const finish = () => {
+    handle.removeEventListener("pointermove", onMove);
+    handle.removeEventListener("pointerup", finish);
+    handle.removeEventListener("pointercancel", finish);
+    handle.classList.remove("vvv-resize--active");
+    setRootResizing(handle, false);
+    store.set(storeKey, lastWidths);
+    ctx.layout.dragging = false;
+    if (ctx.layout.pending) {
+      ctx.layout.pending = false;
+      ctx.redraw();
+    }
+  };
+
+  handle.addEventListener("pointermove", onMove);
+  handle.addEventListener("pointerup", finish);
+  handle.addEventListener("pointercancel", finish);
 }
 
 /** Footer caption, bottom-right small dim text with a green "live" mark. */

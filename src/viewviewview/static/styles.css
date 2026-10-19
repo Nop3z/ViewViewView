@@ -74,6 +74,11 @@
   width: 100%;
 }
 
+/* Explicit widths (after the user drags a divider) switch to fixed layout. */
+.vvv-table--fixed {
+  table-layout: fixed;
+}
+
 /* Sticky header pinned to the pane's own scrollport. */
 .vvv-th {
   background: var(--vvv-header);
@@ -86,6 +91,44 @@
   top: 0;
   white-space: nowrap;
   z-index: 1;
+}
+
+/* Draggable divider between header cells (column width). */
+.vvv-resize {
+  background: linear-gradient(
+    to right,
+    transparent 3px,
+    var(--vvv-border) 3px,
+    var(--vvv-border) 5px,
+    transparent 5px
+  );
+  cursor: col-resize;
+  height: 100%;
+  position: absolute;
+  right: -4px;
+  top: 0;
+  touch-action: none;
+  width: 8px;
+  z-index: 2;
+}
+
+.vvv-resize:hover,
+.vvv-resize--active {
+  background: linear-gradient(
+    to right,
+    transparent 3px,
+    var(--vvv-accent) 3px,
+    var(--vvv-accent) 5px,
+    transparent 5px
+  );
+}
+
+/* While dragging a divider: signal resize + stop text selection inside the
+   widget (shadow-DOM scoped, so document-level body rules would not apply). */
+.vvv-root--resizing,
+.vvv-root--resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }
 
 .vvv-th--num {

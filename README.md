@@ -30,6 +30,7 @@ ViewViewView 用纯 Python 重写了同一条数据通路，只保留必要环�
 - **上下双窗**
   - 上窗 · 分类统计：按 `state`（或任意字符串列）实时计数，如 `PASS: 8932 / FAIL: 41 / TIMEOUT: 12`
   - 下窗 · 结果明细：最新注入置顶，逐行展示完整参数
+  - 列宽可拖动：拖动表头分隔线即可调整列宽，相邻列自动分担；实时刷新期间宽度保持不变
 - **字段完全自定义**：实例化时用 `columns=` 显式声明列名与类型（启动即显示空表头）；也可省略该参数，由第一条 `update(...)` 的关键字自动定义 schema
 - **CSV 自动落地**：默认以控件创建的起始时间命名（`YYYYMMDD-HHMMSS.csv`），也支持手动命名（含子目录）
 - **CSV-first 持久化**：每条结果先写入 CSV，再更新界面；与 FaultViz 的 CSV 格式兼容
@@ -173,11 +174,12 @@ FAIL,191,13,no-reply,3
 ## 开发与验证
 
 ```bash
-python -m pytest -q                     # 47 项契约/一致性/压测测试
-python scripts/smoke_core.py            # 13 项 M1 验收自检
+python -m pytest -q                     # 61 项契约/一致性/压测测试
+python scripts/smoke_core.py            # 15 项 M1 验收自检
+python scripts/build_preview.py         # 由前端源码重新生成 dev/preview.html
 ```
 
-无需 Jupyter 即可预览界面：用浏览器直接打开 [`dev/preview.html`](dev/preview.html)（深色双窗样张，含模拟载荷与“模拟推送”按钮）。
+无需 Jupyter 即可预览界面：用浏览器直接打开 [`dev/preview.html`](dev/preview.html)（深色双窗样张，含模拟载荷、“模拟推送”按钮与列宽拖拽）。访问 `dev/preview.html?resize` 会自动合成一次列宽拖拽，便于截图验收。
 
 设计契约与决策记录见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)；待澄清事项见 [`docs/OPEN_QUESTIONS.md`](docs/OPEN_QUESTIONS.md)。
 
