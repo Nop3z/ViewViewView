@@ -44,7 +44,7 @@
 
 ## 视觉验收
 
-`dev/preview.html` 经 Edge 无头渲染截图（`dev/preview.png`）：深色双窗、上窗 `state/count` 分类计数（白色，与字段同色）、下窗白色字段文字明细、底部“已记录 942 行 / 当前窗口 34 行 · live”状态，符合 §4.4 规格。预声明 `columns=` 时可在无数据阶段渲染空表头骨架。
+`dev/preview.html` 经 Edge 无头渲染截图（`dev/preview.png`）：深色双窗、上窗 `state/count` 分类计数（绿色 `#19ff25`）、下窗白色字段文字明细、底部“已记录 942 行 / 当前窗口 34 行 · live”状态，符合 §4.4 规格。预声明 `columns=` 时可在无数据阶段渲染空表头骨架。
 
 列宽拖拽通过 `dev/preview.html?resize` 在真实浏览器中合成一次拖拽后截图验证：`state` 列收窄、`delay` 列同步加宽，表头分隔线可见；宽度在重绘后保留。`dev/preview.html` 由 `scripts/build_preview.py` 从 `index.mjs`/`styles.css` 生成，避免预览页与源码漂移。
 
@@ -63,10 +63,10 @@
 
 ## JupyterLab 实机验证（2026-10-19）
 
-在 JupyterLab 4.6.4 + ipywidgets 8.1.9 + anywidget 0.11.0 中实际执行 `dev/jupyter_demo.ipynb`（800 次注入），双窗、白色计数、列宽拖拽均正常，截图见 `dev/jupyter-live.png`。此轮验证发现并修复了两个**仅在 Jupyter 环境暴露**的问题：
+在 JupyterLab 4.6.4 + ipywidgets 8.1.9 + anywidget 0.11.0 中实际执行 `dev/jupyter_demo.ipynb`（800 次注入），双窗、绿色计数（`#19ff25`）、列宽拖拽均正常，截图见 `dev/jupyter-live.png`。此轮验证发现并修复了两个**仅在 Jupyter 环境暴露**的问题：
 
 1. **anywidget 默认导出契约**：必须是 `export default { render }`；写成 `export default function render(...)` 时 anywidget 会以无参调用，前端报 `Cannot destructure property 'model' of 'undefined'`，widget 完全不渲染。已在 `index.mjs` 修正并加测试断言。
-2. **样式挂载位置**：anywidget 在 JupyterLab 中可能把 `_css` 注入普通 DOM（而非 shadow root），`:host` 上的 CSS 变量不生效，导致白底黑字。配色 tokens 已从 `:host` 移到 `.vvv-root`，两种挂载方式下都保持深色 + 白字（计数同色）。
+2. **样式挂载位置**：anywidget 在 JupyterLab 中可能把 `_css` 注入普通 DOM（而非 shadow root），`:host` 上的 CSS 变量不生效，导致白底黑字。配色 tokens 已从 `:host` 移到 `.vvv-root`，两种挂载方式下都保持深色 + 白字 + 绿色计数（可自定义）。
 
 复现：`python scripts/capture_jupyter.py`（需要本地 JupyterLab 与 Edge）。
 

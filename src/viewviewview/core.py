@@ -13,6 +13,7 @@ import contextlib
 import csv
 import logging
 import os
+import re
 import threading
 from collections import deque
 from collections.abc import Mapping, Sequence
@@ -36,6 +37,46 @@ _FRAME_DELAY = 0.05          # Syncer frame-merge delay in seconds (4.1)
 _TYPE_NAMES: Dict[type, str] = {int: "int", float: "float", str: "str"}
 
 _DEFAULT_CSV_FORMAT = "%Y%m%d-%H%M%S"  # start-time based default file name
+
+# User-customizable palette entries (API key -> CSS variable in the frontend).
+_COLOR_KEYS = frozenset(
+    {
+        "text",
+        "count",
+        "muted",
+        "background",
+        "panel",
+        "header",
+        "row_alt",
+        "accent",
+        "border",
+        "live",
+    }
+)
+_HEX_COLOR = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+
+
+def _normalize_colors(colors: Any) -> Dict[str, str]:
+    """Validate the optional ``colors=`` palette overrides (contract §3.2).
+
+    Values are hex strings (``#rgb`` or ``#rrggbb``) applied as CSS variables by
+    the frontend, so they cannot inject arbitrary stylesheet text.
+    """
+    if colors is None:
+        return {}
+    if not isinstance(colors, Mapping):
+        raise ValueError("colors must be a mapping of color names to hex values")
+    normalized: Dict[str, str] = {}
+    for key, value in colors.items():
+        if key not in _COLOR_KEYS:
+            supported = ", ".join(sorted(_COLOR_KEYS))
+            raise ValueError(f"unknown color key: {key!r}; supported: {supported}")
+        if not isinstance(value, str) or not _HEX_COLOR.match(value):
+            raise ValueError(
+                f"color values must be hex strings like #19ff25 (got {value!r})"
+            )
+        normalized[key] = value
+    return normalized
 
 
 def _normalize_columns(columns: Any) -> Tuple[List[str], List[Optional[type]]]:
@@ -112,10 +153,15 @@ def _ipython_available() -> bool:
         return False
 
 
-def render_payload(payload: Dict[str, Any], on_created: Optional[Any] = None) -> None:
+def render_payload(
+    payload: Dict[str, Any],
+    colors: Optional[Dict[str, str]] = None,
+    on_created: Optional[Any] = None,
+) -> None:
     """Display one payload through the panel frontend in an IPython session.
 
     Never raises; failures are logged so recording always outlives display.
+    ``colors`` carries user palette overrides to the panel (contract §4.2).
     ``on_created(panel)`` (when provided) runs after a successful panel
     construction and before ``display`` so callers can register the panel
     with their own syncer.
@@ -131,7 +177,7 @@ def render_payload(payload: Dict[str, Any], on_created: Optional[Any] = None) ->
         _LOGGER.exception("Panel frontend unavailable; payload not displayed")
         return
     try:
-        panel = VvvPanel(payload=payload)
+        panel = VvvPanel(payload=payload, colors=colors or {})
         if on_created is not None:
             on_created(panel)
         display(panel)
@@ -294,6 +340,7 @@ class ViewWidget:
         live_rows: Optional[int] = None,
         fsync: bool = False,
         columns: Optional[Any] = None,
+        colors: Optional[Mapping[str, str]] = None,
     ) -> None:
         _validate_limit(display_limit)
         _validate_limit(live_rows)
@@ -304,6 +351,7 @@ class ViewWidget:
             schema_types: List[Optional[type]] = []
         else:
             schema_names, schema_types = _normalize_columns(columns)
+        self._colors: Dict[str, str] = _normalize_colors(colors)
 
         self._lock = threading.RLock()
         self._logger = _LOGGER
@@ -471,7 +519,7 @@ class ViewWidget:
             self._selected_state = state
             self._selected_depth = self._resolve_depth(limit, full)
             payload = self._build_payload_locked(state, self._selected_depth)
-        render_payload(payload, on_created=self._syncer.attach)
+        render_payload(payload, colors=self._colors, on_created=self._syncer.attach)
 
     def plot(self, state: str = "state", limit: Optional[int] = None, full: bool = False) -> None:
         """Visualise the current window via pygwalker or the CSV fallback (3.2)."""

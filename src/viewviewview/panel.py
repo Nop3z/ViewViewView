@@ -60,6 +60,9 @@ if _ANYWIDGET_AVAILABLE:
             snapshot assigned by the core ``Syncer`` (§4.3); rendered as-is.
         theme:
             Palette selector, ``"dark"`` by default (decision D5).
+        colors:
+            Optional palette overrides (API key -> hex string) applied as CSS
+            custom properties by the frontend (decision D13).
         """
 
         _esm = _ESM
@@ -67,6 +70,7 @@ if _ANYWIDGET_AVAILABLE:
 
         payload = T.Dict(default_value={}).tag(sync=True)
         theme = T.Unicode("dark").tag(sync=True)
+        colors = T.Dict(default_value={}).tag(sync=True)
 
 else:
 

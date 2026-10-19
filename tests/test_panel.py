@@ -23,9 +23,10 @@ PAYLOAD = {
 
 
 def test_panel_traits_round_trip():
-    panel = VvvPanel(payload=PAYLOAD)
+    panel = VvvPanel(payload=PAYLOAD, colors={"count": "#19ff25"})
     assert panel.payload == PAYLOAD
     assert panel.theme == "dark"
+    assert panel.colors == {"count": "#19ff25"}
 
 
 def test_panel_bundles_esm_and_css():
@@ -33,8 +34,10 @@ def test_panel_bundles_esm_and_css():
     assert "renderPayload" in panel._esm
     assert "export default { render }" in panel._esm
     assert "vvv-resize" in panel._esm
+    assert "--vvv-count" in panel._esm
     assert "--vvv-bg" in panel._css
     assert "--vvv-panel" in panel._css
+    assert "--vvv-count: #19ff25" in panel._css
     assert "vvv-table--fixed" in panel._css
 
 

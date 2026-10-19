@@ -4,11 +4,12 @@
  * Palette tokens are declared on `.vvv-root` rather than `:host`: anywidget
  * may inject this stylesheet into the light DOM (ipywidgets fallback) where
  * `:host` never matches. `.vvv-root` exists in both rendering modes, so the
- * dark palette and the white text/count colors are identical in JupyterLab,
- * Voilà and the standalone preview page.
+ * dark palette and the white field text / green count text are identical in
+ * JupyterLab, Voilà and the standalone preview page. Count color defaults to
+ * #19ff25 and can be overridden via the ``colors=`` widget argument.
  *
  * Palette: Deephaven dark-tone approximation — near-black surfaces, pure white
- * field and count text (decisions D5/D10).
+ * field text, green count values (decisions D5/D10/D13).
  */
 
 :host {
@@ -25,7 +26,7 @@
   --vvv-accent: #3d6fe0;
   --vvv-border: #333b45;
   --vvv-live: #2ea043;
-  --vvv-count: #ffffff;
+  --vvv-count: #19ff25;
 
   background: var(--vvv-bg);
   box-sizing: border-box;

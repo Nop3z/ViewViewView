@@ -39,7 +39,7 @@ def capture_show_payload(widget):
     captured = {}
     original = core.render_payload
 
-    def fake_render(payload, on_created=None):
+    def fake_render(payload, colors=None, on_created=None):
         captured["payload"] = payload
 
     core.render_payload = fake_render
@@ -247,7 +247,7 @@ GALLERY_HTML = """<!doctype html>
   <h1>ViewViewView · 实测效果</h1>
   <p class="lead">真实 Python 核心产出的载荷（__ROWS__ 次模拟注入），经 bundled 前端渲染；列宽图为合成拖拽后的效果。</p>
   <div class="shot"><img src="demo-empty.png" alt="empty"><p class="cap">① 实例化 columns=... 后 vt.show()：5 列空表骨架，尚未注入</p></div>
-  <div class="shot"><img src="demo-live.png" alt="live"><p class="cap">② 真实运行结果：上窗分类计数（白色）、下窗最新 1000 行明细（live_rows 窗口）、底部总数与 live 状态</p></div>
+  <div class="shot"><img src="demo-live.png" alt="live"><p class="cap">② 真实运行结果：上窗分类计数（绿色 #19ff25）、下窗最新 1000 行明细（live_rows 窗口）、底部总数与 live 状态</p></div>
   <div class="shot"><img src="demo-resize.png" alt="resize"><p class="cap">③ 拖动表头分隔线：state 列收窄、delay 列加宽（宽度在实时刷新间保持）</p></div>
 </body>
 </html>

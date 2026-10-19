@@ -251,6 +251,36 @@ def test_tail_reader_window_and_malformed(tmp_path):
         _TailReader(str(malformed)).read(None)
 
 
+def test_colors_override_validation(tmp_path):
+    widget = ViewWidget(
+        csv_path=str(tmp_path / "a.csv"),
+        colors={"count": "#19ff25", "text": "#ffffff"},
+    )
+    assert widget._colors == {"count": "#19ff25", "text": "#ffffff"}
+    widget.close()
+    for bad in ({"nope": "#fff"}, {"count": "green"}, {"count": 123}, ["#fff"]):
+        with pytest.raises(ValueError):
+            ViewWidget(colors=bad)
+
+
+def test_show_passes_colors_to_panel(tmp_path, monkeypatch):
+    import viewviewview.core as core
+
+    captured = {}
+    monkeypatch.setattr(
+        core,
+        "render_payload",
+        lambda payload, colors=None, on_created=None: captured.update({"colors": colors}),
+    )
+    widget = ViewWidget(
+        csv_path=str(tmp_path / "a.csv"), colors={"count": "#19ff25"}
+    )
+    widget.update(state="PASS", delay=1)
+    widget.show()
+    assert captured["colors"] == {"count": "#19ff25"}
+    widget.close()
+
+
 def test_show_builds_contract_payload(tmp_path, monkeypatch):
     import viewviewview.core as core
 
@@ -258,7 +288,9 @@ def test_show_builds_contract_payload(tmp_path, monkeypatch):
     monkeypatch.setattr(
         core,
         "render_payload",
-        lambda payload, on_created=None: captured.update({"payload": payload}),
+        lambda payload, colors=None, on_created=None: captured.update(
+            {"payload": payload}
+        ),
     )
     widget = ViewWidget(csv_path=str(tmp_path / "a.csv"))
     for index in range(10):
@@ -282,7 +314,9 @@ def test_show_limit_zero_is_counts_only(tmp_path, monkeypatch):
     monkeypatch.setattr(
         core,
         "render_payload",
-        lambda payload, on_created=None: captured.update({"payload": payload}),
+        lambda payload, colors=None, on_created=None: captured.update(
+            {"payload": payload}
+        ),
     )
     widget = ViewWidget(csv_path=str(tmp_path / "a.csv"))
     widget.update(state="PASS", delay=1)
@@ -299,7 +333,9 @@ def test_show_without_state_column(tmp_path, monkeypatch):
     monkeypatch.setattr(
         core,
         "render_payload",
-        lambda payload, on_created=None: captured.update({"payload": payload}),
+        lambda payload, colors=None, on_created=None: captured.update(
+            {"payload": payload}
+        ),
     )
     widget = ViewWidget(csv_path=str(tmp_path / "a.csv"))
     widget.update(delay=1, pulse=2.5)
@@ -350,7 +386,9 @@ def test_predefined_columns_mapping(tmp_path, monkeypatch):
     monkeypatch.setattr(
         core,
         "render_payload",
-        lambda payload, on_created=None: captured.update({"payload": payload}),
+        lambda payload, colors=None, on_created=None: captured.update(
+            {"payload": payload}
+        ),
     )
     widget = ViewWidget(
         csv_path=str(tmp_path / "a.csv"),

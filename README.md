@@ -35,7 +35,7 @@ ViewViewView 用纯 Python 重写了同一条数据通路，只保留必要环�
 - **CSV 自动落地**：默认以控件创建的起始时间命名（`YYYYMMDD-HHMMSS.csv`），也支持手动命名（含子目录）
 - **CSV-first 持久化**：每条结果先写入 CSV，再更新界面；与 FaultViz 的 CSV 格式兼容
 - **受限内存**：`live_rows` 环形窗口，任意注入量级内存恒定
-- **深色主题**：黑色背景、白色文字与计数，对齐 FaultViz 观感，适合暗室长时间盯屏
+- **深色主题**：黑色背景、白色字段文字、绿色计数（默认 `#19ff25`），计数颜色等均可通过 `colors=` 自定义，适合暗室长时间盯屏
 - **线程安全**：`update/flush/close` 可在工作线程并发调用
 - **零前端依赖**：anywidget 单文件 ESM + Shadow DOM，不拉取 CDN、不需要 npm 构建
 
@@ -110,6 +110,31 @@ vt = faultviz.ViewWidget(columns=["state", "delay", "pulse", "reply", "errcode"]
 ```
 
 > 注意：`bool`、numpy 标量等不会被隐式转换（与 FaultViz 的类型规则一致）。需要时请先 `.item()` 或显式转换。
+
+### 自定义配色（可选）
+
+`ViewWidget(colors={...})` 可覆盖任意界面颜色，只传想改的 key，其余保持默认：
+
+```python
+vt = faultviz.ViewWidget(
+    colors={
+        "count": "#19ff25",     # 上窗计数值（默认 #19ff25）
+        "text": "#ffffff",      # 字段文字
+        "muted": "#8b95a1",     # 页脚、空态提示
+        "background": "#1c2126",
+        "panel": "#232931",
+        "header": "#2b323a",
+        "row_alt": "#20252b",
+        "accent": "#3d6fe0",
+        "border": "#333b45",
+        "live": "#2ea043",
+    }
+)
+```
+
+- 颜色值支持 `#rgb` / `#rrggbb`
+- 未知 key、非十六进制值会抛 `ValueError`
+- 所有颜色在 widget 创建时一次性传入；默认计数色为 `#19ff25`
 
 ### CSV-only 记录（不打开界面）
 

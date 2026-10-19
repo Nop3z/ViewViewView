@@ -13,6 +13,20 @@
 
 const MIN_COLUMN_WIDTH = 56;
 
+/** API color key -> CSS custom property (see contract §4.4). */
+const COLOR_VARS = Object.freeze({
+  text: "--vvv-fg",
+  count: "--vvv-count",
+  muted: "--vvv-fg-dim",
+  background: "--vvv-bg",
+  panel: "--vvv-panel",
+  header: "--vvv-header",
+  row_alt: "--vvv-row-alt",
+  accent: "--vvv-accent",
+  border: "--vvv-border",
+  live: "--vvv-live",
+});
+
 /**
  * Default anywidget entry point: render the current payload snapshot and keep
  * the DOM in sync with subsequent `change:payload` / `change:theme` pushes.
@@ -28,6 +42,7 @@ function render({ model, el }) {
   const root = document.createElement("div");
   root.className = "vvv-root";
   applyTheme(root, model.get("theme"));
+  applyColors(root, model.get("colors"));
   el.appendChild(root);
 
   const layout = {
@@ -51,13 +66,16 @@ function render({ model, el }) {
     draw(model.get("payload"));
   };
   const onThemeChange = () => applyTheme(root, model.get("theme"));
+  const onColorsChange = () => applyColors(root, model.get("colors"));
   model.on("change:payload", onPayloadChange);
   model.on("change:theme", onThemeChange);
+  model.on("change:colors", onColorsChange);
 
   return () => {
     if (typeof model.off === "function") {
       model.off("change:payload", onPayloadChange);
       model.off("change:theme", onThemeChange);
+      model.off("change:colors", onColorsChange);
     }
   };
 }
@@ -391,12 +409,30 @@ function buildNote(text) {
 }
 
 /**
- * Theme lives on a data attribute for future palettes; CSS tokens (§4.4) are
- * dark-only for now, so any non-"dark" value still renders dark (B1).
+ * Theme lives on a data attribute for future palettes; the bundled tokens are
+ * dark by default (D5), and user overrides are applied as inline CSS vars.
  */
 function applyTheme(root, theme) {
   const value = typeof theme === "string" && theme !== "" ? theme : "dark";
   root.setAttribute("data-vvv-theme", value);
+}
+
+/**
+ * Apply user palette overrides (contract §3.2 ``colors=``). Only the keys
+ * present in the mapping are overridden; everything else keeps the bundled
+ * defaults. Values were validated as hex strings on the Python side, and are
+ * applied with ``setProperty`` (never concatenated into stylesheet text).
+ */
+function applyColors(root, colors) {
+  const overrides = colors !== null && typeof colors === "object" ? colors : {};
+  for (const [key, cssVar] of Object.entries(COLOR_VARS)) {
+    const value = overrides[key];
+    if (typeof value === "string" && value !== "") {
+      root.style.setProperty(cssVar, value);
+    } else {
+      root.style.removeProperty(cssVar);
+    }
+  }
 }
 
 /** @returns {boolean} True when the column type is numeric (right-aligned). */
