@@ -35,7 +35,7 @@ ViewViewView 用纯 Python 重写了同一条数据通路，只保留必要环�
 - **CSV 自动落地**：默认以控件创建的起始时间命名（`YYYYMMDD-HHMMSS.csv`），也支持手动命名（含子目录）
 - **CSV-first 持久化**：每条结果先写入 CSV，再更新界面；与 FaultViz 的 CSV 格式兼容
 - **受限内存**：`live_rows` 环形窗口，任意注入量级内存恒定
-- **深色主题**：黑色背景、白色字段文字、绿色计数（默认 `#19ff25`），计数颜色等均可通过 `colors=` 自定义，适合暗室长时间盯屏
+- **深色主题**：黑色背景、白色字符串文字、绿色计数与数值列（默认 `#19ff25`），颜色均可通过 `colors=` 自定义，适合暗室长时间盯屏
 - **线程安全**：`update/flush/close` 可在工作线程并发调用
 - **零前端依赖**：anywidget 单文件 ESM + Shadow DOM，不拉取 CDN、不需要 npm 构建
 
@@ -119,7 +119,8 @@ vt = faultviz.ViewWidget(columns=["state", "delay", "pulse", "reply", "errcode"]
 vt = faultviz.ViewWidget(
     colors={
         "count": "#19ff25",     # 上窗计数值（默认 #19ff25）
-        "text": "#ffffff",      # 字段文字
+        "number": "#19ff25",    # 明细数值列（delay/pulse/errcode 等，默认 #19ff25）
+        "text": "#ffffff",      # 字段文字（state/reply 等字符串列）
         "muted": "#8b95a1",     # 页脚、空态提示
         "background": "#1c2126",
         "panel": "#232931",

@@ -43,6 +43,7 @@ _COLOR_KEYS = frozenset(
     {
         "text",
         "count",
+        "number",
         "muted",
         "background",
         "panel",

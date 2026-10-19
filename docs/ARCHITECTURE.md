@@ -17,8 +17,8 @@
   - D7 与 FaultViz 的有意偏差（README 中向用户声明）：`start_view_service` 变为可选 no-op；明细窗默认深度 200 行；`plot/csvplot` 中 pygwalker 为可选依赖；新增可选 `columns=` 扩展参数。
   - D8 字段自定义扩展：`ViewWidget(..., columns=...)` 支持映射 `{name: int|float|str}`（显式类型）或名称序列（类型由首条记录推断）；未传时保持 FaultViz“首行定 schema”行为。预声明 schema 时 `show()` 可渲染带表头的空表骨架。
   - D9 CSV 默认文件名 = 控件创建（实验开始）时刻：`YYYYMMDD-HHMMSS.csv`，同名冲突追加 `-1`；仍支持 `csv_path=` 手动命名（自动创建父目录）。
-  - D10 视觉：深色主题；字段文字纯白 `#ffffff`；计数使用 FaultViz 的 positive-number 绿色，默认 `#19ff25`（可由 `colors=` 覆盖）。
-  - D13 配色可自定义：`ViewWidget(..., colors={...})` 接受 `text/count/muted/background/panel/header/row_alt/accent/border/live` 十个 key 的十六进制颜色；仅覆盖传入项，前端以 CSS 变量方式应用（不拼接样式文本）。
+  - D10 视觉：深色主题；字符串字段文字纯白 `#ffffff`；计数与明细数值列使用 FaultViz 的 positive-number 绿色，默认均为 `#19ff25`（可分别由 `colors=` 的 `count` / `number` 覆盖）。
+  - D13 配色可自定义：`ViewWidget(..., colors={...})` 接受 `text/count/number/muted/background/panel/header/row_alt/accent/border/live` 十一个 key 的十六进制颜色；仅覆盖传入项，前端以 CSS 变量方式应用（不拼接样式文本）。
   - D11 列宽可拖拽：拖动表头分隔线调整列宽；相邻两列分担增量，最后一列向右扩展表格（容器横向滚动）。宽度按表（统计表/明细表）保存在视图状态中，跨实时刷新保持；拖拽期间暂缓 payload 重绘，释放后立即补上最新快照。
   - D12 紧凑列布局：表格默认按内容宽度排列（`width: max-content`，不再拉伸到面板整宽），上窗 `state` 与 `count` 相邻、明细各列紧贴（对齐 FaultViz 观感）；拖动表头分隔线在此基础上微调列宽。
 - 参考工具链：核心依赖仅 `anywidget`；`pygwalker`/`pandas` 仅 plot 路径使用（extras）；打包 hatchling。
@@ -50,7 +50,7 @@ No-op：校验后记录日志 `"Deephaven service not required; live rendering i
 ### 3.2 `ViewWidget(csv_path=None, display_limit=None, flush_every=1, live_rows=None, fsync=False, columns=None, colors=None)`
 构造校验（语义/错误消息与 FaultViz 相同）：`display_limit`、`live_rows` 须为非负 int 或 None，否则 `ValueError("limit must be a non-negative integer or None")`；`flush_every` 须为正 int，否则 `ValueError("flush_every must be a positive integer")`；`fsync` 须为 bool，否则 `ValueError("fsync must be a bool")`。
 `columns`（向后兼容扩展）：`None` = 首行定 schema；`Mapping[str, int|float|str]` = 列名/列序/类型全部显式；序列 `[name, ...]` = 仅固定列名/列序，类型由首条合法记录推断。非法输入（空、重名、非字符串名、非 int/float/str 类型）抛 `ValueError`。
-`colors`（向后兼容扩展，D13）：`Mapping[str, str]`，key ∈ `text/count/muted/background/panel/header/row_alt/accent/border/live`，value 为 `#rgb`/`#rrggbb`；未知 key 或非法色值抛 `ValueError`。仅覆盖传入项，其余用默认配色。
+`colors`（向后兼容扩展，D13）：`Mapping[str, str]`，key ∈ `text/count/number/muted/background/panel/header/row_alt/accent/border/live`，value 为 `#rgb`/`#rrggbb`；未知 key 或非法色值抛 `ValueError`。仅覆盖传入项，其余用默认配色。`count` 控制上窗计数，`number` 控制明细表数值列（`delay`/`pulse`/`errcode` 等），两者默认都是 `#19ff25`。
 属性：`csv_path -> str`（绝对路径；默认在实例化时按起始时间生成 `YYYYMMDD-HHMMSS.csv`，文件在首条合法记录时才创建），`rows_written -> int`。
 上下文管理器协议 + `close()` 幂等可重入。
 
@@ -122,7 +122,7 @@ CSV 值类型：int/float 原样，str 原样；`state_key` 对应列值以 `str
 
 ### 4.4 前端规格 — B 实现（Deephaven 深色基调）
 - 布局：单容器两窗。表格**按内容紧凑排列**（不撑满面板，`state` 与 `count` 相邻，明细列紧贴），上窗“分类统计”（表头 `state 桶 | count`，高度自适应≈150px），下窗明细（schema 列，sticky 表头，斑马纹，最新行置顶）。数字等宽 `font-variant-numeric: tabular-nums`。
-- 主题 tokens（styles.css `.vvv-root` 变量，Deephaven 深色近似）：`--vvv-bg:#1c2126; --vvv-panel:#232931; --vvv-header:#2b323a; --vvv-row-alt:#20252b; --vvv-fg:#ffffff; --vvv-fg-dim:#8b95a1; --vvv-accent:#3d6fe0; --vvv-border:#333b45; --vvv-live:#2ea043; --vvv-count:#19ff25;`。字段文字为纯白，计数为 FaultViz positive-number 绿（默认 `#19ff25`）；`colors=` 覆盖项以 inline CSS 变量应用，优先级高于默认值。
+- 主题 tokens（styles.css `.vvv-root` 变量，Deephaven 深色近似）：`--vvv-bg:#1c2126; --vvv-panel:#232931; --vvv-header:#2b323a; --vvv-row-alt:#20252b; --vvv-fg:#ffffff; --vvv-fg-dim:#8b95a1; --vvv-accent:#3d6fe0; --vvv-border:#333b45; --vvv-live:#2ea043; --vvv-count:#19ff25; --vvv-number:#19ff25;`。字符串字段为纯白；上窗计数与明细数值列均为 FaultViz positive-number 绿（默认 `#19ff25`），可分别通过 `colors=` 的 `count` / `number` 覆盖，覆盖项以 inline CSS 变量应用。
 - DOM 构造**只用 textContent/createElement**，禁 innerHTML（载荷字符串不可信 = 防注入）。
 - 列宽拖拽（D11）：每个 `<th>` 右侧带 8px `col-resize` 手柄；首次拖拽冻结当前列宽（`table-layout: fixed` + `<colgroup>` 像素宽度），相邻列分担增量、末列扩展表格；宽度按表存储在视图状态（`counts` / `detail`），实时重绘后自动恢复；拖拽期间挂起重绘，`pointerup` 后补最新帧。拖拽时给根节点加 `vvv-root--resizing`（shadow DOM 内锁定 `col-resize` 光标与禁止选中）。
 - 渲染性能：≤200 行全量重绘 + DocumentFragment，无虚拟化框架、零 npm 依赖、纯单文件 ESM。

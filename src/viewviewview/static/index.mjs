@@ -17,6 +17,7 @@ const MIN_COLUMN_WIDTH = 56;
 const COLOR_VARS = Object.freeze({
   text: "--vvv-fg",
   count: "--vvv-count",
+  number: "--vvv-number",
   muted: "--vvv-fg-dim",
   background: "--vvv-bg",
   panel: "--vvv-panel",
@@ -220,7 +221,8 @@ function buildDetailTable(columns, rows, ctx) {
     const tr = document.createElement("tr");
     columns.forEach((column, index) => {
       const td = document.createElement("td");
-      td.className = "vvv-td" + (isNumericType(column.type) ? " vvv-td--num" : "");
+      const numeric = isNumericType(column.type);
+      td.className = "vvv-td" + (numeric ? " vvv-td--num vvv-num" : "");
       td.textContent = toDisplayText(values[index]);
       tr.appendChild(td);
     });

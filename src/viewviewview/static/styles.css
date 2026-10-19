@@ -27,6 +27,7 @@
   --vvv-border: #333b45;
   --vvv-live: #2ea043;
   --vvv-count: #19ff25;
+  --vvv-number: #19ff25;
 
   background: var(--vvv-bg);
   box-sizing: border-box;
@@ -142,10 +143,15 @@
   text-align: right;
 }
 
-/* Count values follow the FaultViz look: same foreground as other fields,
-   only right-aligned. Override --vvv-count to tint them if desired. */
+/* Count values (top pane) and numeric detail cells (delay, pulse, errcode,
+   ...) share the FaultViz positive-number green by default. Override
+   --vvv-count / --vvv-number to tint them independently. */
 .vvv-count {
   color: var(--vvv-count);
+}
+
+.vvv-num {
+  color: var(--vvv-number);
 }
 
 /* Zebra rows; hover highlights with the header tone. */

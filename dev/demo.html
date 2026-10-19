@@ -55,6 +55,7 @@
   --vvv-border: #333b45;
   --vvv-live: #2ea043;
   --vvv-count: #19ff25;
+  --vvv-number: #19ff25;
 
   background: var(--vvv-bg);
   box-sizing: border-box;
@@ -170,10 +171,15 @@
   text-align: right;
 }
 
-/* Count values follow the FaultViz look: same foreground as other fields,
-   only right-aligned. Override --vvv-count to tint them if desired. */
+/* Count values (top pane) and numeric detail cells (delay, pulse, errcode,
+   ...) share the FaultViz positive-number green by default. Override
+   --vvv-count / --vvv-number to tint them independently. */
 .vvv-count {
   color: var(--vvv-count);
+}
+
+.vvv-num {
+  color: var(--vvv-number);
 }
 
 /* Zebra rows; hover highlights with the header tone. */
@@ -249,6 +255,7 @@ const MIN_COLUMN_WIDTH = 56;
 const COLOR_VARS = Object.freeze({
   text: "--vvv-fg",
   count: "--vvv-count",
+  number: "--vvv-number",
   muted: "--vvv-fg-dim",
   background: "--vvv-bg",
   panel: "--vvv-panel",
@@ -452,7 +459,8 @@ function buildDetailTable(columns, rows, ctx) {
     const tr = document.createElement("tr");
     columns.forEach((column, index) => {
       const td = document.createElement("td");
-      td.className = "vvv-td" + (isNumericType(column.type) ? " vvv-td--num" : "");
+      const numeric = isNumericType(column.type);
+      td.className = "vvv-td" + (numeric ? " vvv-td--num vvv-num" : "");
       td.textContent = toDisplayText(values[index]);
       tr.appendChild(td);
     });

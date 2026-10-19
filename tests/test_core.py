@@ -254,9 +254,13 @@ def test_tail_reader_window_and_malformed(tmp_path):
 def test_colors_override_validation(tmp_path):
     widget = ViewWidget(
         csv_path=str(tmp_path / "a.csv"),
-        colors={"count": "#19ff25", "text": "#ffffff"},
+        colors={"count": "#19ff25", "number": "#19ff25", "text": "#ffffff"},
     )
-    assert widget._colors == {"count": "#19ff25", "text": "#ffffff"}
+    assert widget._colors == {
+        "count": "#19ff25",
+        "number": "#19ff25",
+        "text": "#ffffff",
+    }
     widget.close()
     for bad in ({"nope": "#fff"}, {"count": "green"}, {"count": 123}, ["#fff"]):
         with pytest.raises(ValueError):

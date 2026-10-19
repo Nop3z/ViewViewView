@@ -34,10 +34,13 @@ def test_panel_bundles_esm_and_css():
     assert "renderPayload" in panel._esm
     assert "export default { render }" in panel._esm
     assert "vvv-resize" in panel._esm
+    assert "vvv-num" in panel._esm
     assert "--vvv-count" in panel._esm
+    assert "--vvv-number" in panel._esm
     assert "--vvv-bg" in panel._css
     assert "--vvv-panel" in panel._css
     assert "--vvv-count: #19ff25" in panel._css
+    assert "--vvv-number: #19ff25" in panel._css
     assert "vvv-table--fixed" in panel._css
 
 
