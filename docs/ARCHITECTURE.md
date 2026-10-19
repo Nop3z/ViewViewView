@@ -30,7 +30,7 @@
 
 ## 2. 数据模型（核心不变式）
 
-- 单实例 schema：首个合法 `update(**kwargs)` 的 kwargs 顺序即列集列序。仅接受**精确类型** `int` / `float` / `str`（`type(v) is T`；bool、numpy 标量一律不匹配）。此后每行都必须键集、键名、键序、类型完全一致。
+- 单实例 schema：首个合法 `update(**kwargs)` 的 kwargs 顺序即列集列序。仅接受**精确类型** `int` / `float` / `str`（`type(v) is T`；bool、numpy 标量一律不匹配）。此后每行都必须键集一致、类型逐一精确匹配；**键的传入顺序不敏感**（与 FaultViz 的 `_check_columns` 行为一致；CSV 始终按冻结的 schema 列序落盘）。
 - 一行数据同时流入两条通道：
   1. **CSV 通道（权威）**：先于一切显示工作写入；失败则视同致命。
   2. **内存通道**：`counts`（仅 str 列的 `dict[str,int]` 计数，覆盖本实例写入的每一行；可无限增长，属预期）与 `ring`（最近 N 行的 deque 环形缓冲，N 由 live_rows/展示深度控制）。

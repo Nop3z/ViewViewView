@@ -1,0 +1,152 @@
+/*
+ * ViewViewView dual-pane widget styles — ARCHITECTURE.md §4.4.
+ *
+ * anywidget injects this file into the widget shadow root, so palette tokens
+ * are declared on `:host` to stay isolated to this component, and every
+ * visible element carries a `.vvv-` class prefix.
+ *
+ * Palette: Deephaven dark-tone approximation — near-black surfaces, soft
+ * off-white foreground, blue accent, low saturation overall (decision D5).
+ * Hex values follow §4.4 verbatim (allowed micro-tuning was not needed).
+ */
+
+:host {
+  --vvv-bg: #1c2126;
+  --vvv-panel: #232931;
+  --vvv-header: #2b323a;
+  --vvv-row-alt: #20252b;
+  --vvv-fg: #dfe3e8;
+  --vvv-fg-dim: #8b95a1;
+  --vvv-accent: #3d6fe0;
+  --vvv-border: #333b45;
+  --vvv-live: #2ea043;
+
+  background: var(--vvv-bg);
+  box-sizing: border-box;
+  color: var(--vvv-fg);
+  display: block;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, "Microsoft YaHei", sans-serif;
+  font-size: 13px;
+  height: 100%;
+  line-height: 1.45;
+  max-height: 640px;
+  min-height: 320px;
+  scrollbar-color: var(--vvv-border) transparent;
+  scrollbar-width: thin;
+}
+
+/* Two-pane layout: counts pane ≈150px caps, detail pane fills the remainder. */
+.vvv-root {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  max-height: 640px;
+  min-height: 320px;
+  padding: 10px 12px;
+}
+
+.vvv-pane {
+  background: var(--vvv-panel);
+  border: 1px solid var(--vvv-border);
+  border-radius: 8px;
+  box-sizing: border-box;
+  overflow: auto;
+}
+
+.vvv-pane--counts {
+  flex: 0 0 auto;
+  max-height: 150px;
+}
+
+/* min-height:0 lets the inner table scroll inside the flexible pane. */
+.vvv-pane--detail {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.vvv-table {
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  width: 100%;
+}
+
+/* Sticky header pinned to the pane's own scrollport. */
+.vvv-th {
+  background: var(--vvv-header);
+  border-bottom: 1px solid var(--vvv-border);
+  color: var(--vvv-fg);
+  font-weight: 600;
+  padding: 6px 12px;
+  position: sticky;
+  text-align: left;
+  top: 0;
+  white-space: nowrap;
+  z-index: 1;
+}
+
+.vvv-th--num {
+  text-align: right;
+}
+
+.vvv-td {
+  border-bottom: 1px solid var(--vvv-border);
+  color: var(--vvv-fg);
+  max-width: 480px;
+  overflow: hidden;
+  padding: 4px 12px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vvv-td--num {
+  text-align: right;
+}
+
+/* Zebra rows; hover highlights with the header tone. */
+.vvv-table tbody tr:nth-child(even) {
+  background: var(--vvv-row-alt);
+}
+
+.vvv-table tbody tr:hover {
+  background: var(--vvv-header);
+}
+
+/* Graceful empty states ("No data recorded." / "No state column"). */
+.vvv-note {
+  color: var(--vvv-fg-dim);
+  font-size: 12px;
+  padding: 12px 14px;
+}
+
+/* Bottom-right small caption: 已记录 n 行 / 当前窗口 m 行 / live. */
+.vvv-footer {
+  align-items: center;
+  color: var(--vvv-fg-dim);
+  display: flex;
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  gap: 10px;
+  justify-content: flex-end;
+  padding: 0 2px;
+}
+
+.vvv-live {
+  align-items: center;
+  color: var(--vvv-live);
+  display: inline-flex;
+  gap: 4px;
+}
+
+.vvv-live::before {
+  background: var(--vvv-live);
+  border-radius: 50%;
+  content: "";
+  display: inline-block;
+  height: 6px;
+  width: 6px;
+}
