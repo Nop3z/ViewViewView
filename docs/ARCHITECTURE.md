@@ -10,6 +10,7 @@
   - D1 零 JVM/JDK，纯 Python 后端。
   - D2 显示形态：JupyterLab 内嵌，anywidget 单文件前端。
   - D3 协议：MulanPSL-2.0。
+    - 补充裁定（2026-10-19，项目所有者确认）：GitHub 远端初始提交中的 MIT LICENSE 文件将在 M4 由文档工程师替换为 MulanPSL-2.0 官方全文；pyproject 的 license 表达式为 `MulanPSL-2.0`；README 需标注并附官方链接 http://license.coscl.org.cn/MulanPSL2 。
   - D4 支持 Python ≥ 3.9。
   - D5 配色：深色（Deephaven 深色主题基调）。
   - D6 **Clean-room**：所有实现依据本契约，**禁止阅读** `D:\project\faultviz_reference\` 下任何源码。缺口与本契约冲突一律走 §9 流程。
