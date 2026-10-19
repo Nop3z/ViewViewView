@@ -13,7 +13,12 @@ import io
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
-from .core import _TailReader, _validate_limit, render_payload
+from .core import (
+    _DEFAULT_NUMBER_COLUMNS,
+    _TailReader,
+    _validate_limit,
+    render_payload,
+)
 
 __all__ = ["start_view_service", "csvview", "csvplot"]
 
@@ -109,7 +114,10 @@ def csvview(
     if not rows:
         _LOGGER.info("No data recorded in %s", csv)
         return
-    render_payload(_build_payload(header, rows, state))
+    render_payload(
+        _build_payload(header, rows, state),
+        number_columns=list(_DEFAULT_NUMBER_COLUMNS),
+    )
 
 
 def csvplot(name: str, limit: Optional[int] = None, full: bool = False) -> None:

@@ -261,27 +261,45 @@ def test_colors_override_validation(tmp_path):
         "number": "#19ff25",
         "text": "#ffffff",
     }
+    assert widget._number_columns == ["delay", "pulse"]
     widget.close()
     for bad in ({"nope": "#fff"}, {"count": "green"}, {"count": 123}, ["#fff"]):
         with pytest.raises(ValueError):
             ViewWidget(colors=bad)
 
 
-def test_show_passes_colors_to_panel(tmp_path, monkeypatch):
+def test_number_columns_validation(tmp_path):
+    widget = ViewWidget(
+        csv_path=str(tmp_path / "a.csv"), number_columns=["delay", "temperature"]
+    )
+    assert widget._number_columns == ["delay", "temperature"]
+    widget.close()
+    assert ViewWidget(number_columns=[])._number_columns == []
+    for bad in ("delay", [""], [1], 42):
+        with pytest.raises(ValueError):
+            ViewWidget(number_columns=bad)
+
+
+def test_show_passes_colors_and_number_columns(tmp_path, monkeypatch):
     import viewviewview.core as core
 
     captured = {}
     monkeypatch.setattr(
         core,
         "render_payload",
-        lambda payload, colors=None, on_created=None: captured.update({"colors": colors}),
+        lambda payload, colors=None, number_columns=None, on_created=None: captured.update(
+            {"colors": colors, "number_columns": number_columns}
+        ),
     )
     widget = ViewWidget(
-        csv_path=str(tmp_path / "a.csv"), colors={"count": "#19ff25"}
+        csv_path=str(tmp_path / "a.csv"),
+        colors={"count": "#19ff25"},
+        number_columns=["delay"],
     )
-    widget.update(state="PASS", delay=1)
+    widget.update(state="PASS", delay=1, pulse=2, errcode=0)
     widget.show()
     assert captured["colors"] == {"count": "#19ff25"}
+    assert captured["number_columns"] == ["delay"]
     widget.close()
 
 
@@ -292,7 +310,7 @@ def test_show_builds_contract_payload(tmp_path, monkeypatch):
     monkeypatch.setattr(
         core,
         "render_payload",
-        lambda payload, colors=None, on_created=None: captured.update(
+        lambda payload, colors=None, number_columns=None, on_created=None: captured.update(
             {"payload": payload}
         ),
     )
@@ -318,7 +336,7 @@ def test_show_limit_zero_is_counts_only(tmp_path, monkeypatch):
     monkeypatch.setattr(
         core,
         "render_payload",
-        lambda payload, colors=None, on_created=None: captured.update(
+        lambda payload, colors=None, number_columns=None, on_created=None: captured.update(
             {"payload": payload}
         ),
     )
@@ -337,7 +355,7 @@ def test_show_without_state_column(tmp_path, monkeypatch):
     monkeypatch.setattr(
         core,
         "render_payload",
-        lambda payload, colors=None, on_created=None: captured.update(
+        lambda payload, colors=None, number_columns=None, on_created=None: captured.update(
             {"payload": payload}
         ),
     )
@@ -390,7 +408,7 @@ def test_predefined_columns_mapping(tmp_path, monkeypatch):
     monkeypatch.setattr(
         core,
         "render_payload",
-        lambda payload, colors=None, on_created=None: captured.update(
+        lambda payload, colors=None, number_columns=None, on_created=None: captured.update(
             {"payload": payload}
         ),
     )

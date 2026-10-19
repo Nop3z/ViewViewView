@@ -306,7 +306,13 @@ function render({ model, el }) {
     dragging: false,
     pending: false,
   };
-  const ctx = { layout, redraw: () => draw(model.get("payload")) };
+  const readNumberColumns = (value) =>
+    new Set(Array.isArray(value) ? value : ["delay", "pulse"]);
+  const ctx = {
+    layout,
+    numberColumns: readNumberColumns(model.get("number_columns")),
+    redraw: () => draw(model.get("payload")),
+  };
   const draw = (payload) => renderPayload(root, payload, ctx);
 
   draw(model.get("payload"));
@@ -322,15 +328,21 @@ function render({ model, el }) {
   };
   const onThemeChange = () => applyTheme(root, model.get("theme"));
   const onColorsChange = () => applyColors(root, model.get("colors"));
+  const onNumberColumnsChange = () => {
+    ctx.numberColumns = readNumberColumns(model.get("number_columns"));
+    draw(model.get("payload"));
+  };
   model.on("change:payload", onPayloadChange);
   model.on("change:theme", onThemeChange);
   model.on("change:colors", onColorsChange);
+  model.on("change:number_columns", onNumberColumnsChange);
 
   return () => {
     if (typeof model.off === "function") {
       model.off("change:payload", onPayloadChange);
       model.off("change:theme", onThemeChange);
       model.off("change:colors", onColorsChange);
+      model.off("change:number_columns", onNumberColumnsChange);
     }
   };
 }
@@ -476,7 +488,11 @@ function buildDetailTable(columns, rows, ctx) {
     columns.forEach((column, index) => {
       const td = document.createElement("td");
       const numeric = isNumericType(column.type);
-      td.className = "vvv-td" + (numeric ? " vvv-td--num vvv-num" : "");
+      const highlighted = ctx.numberColumns.has(column.name);
+      td.className =
+        "vvv-td" +
+        (numeric ? " vvv-td--num" : "") +
+        (highlighted ? " vvv-num" : "");
       td.textContent = toDisplayText(values[index]);
       tr.appendChild(td);
     });

@@ -56,6 +56,23 @@ _COLOR_KEYS = frozenset(
 )
 _HEX_COLOR = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 
+# Columns that use the "number" color (#19ff25) by default.
+_DEFAULT_NUMBER_COLUMNS = ("delay", "pulse")
+
+
+def _normalize_number_columns(value: Any) -> List[str]:
+    """Validate ``number_columns=`` (columns rendered with the number color)."""
+    if value is None:
+        return list(_DEFAULT_NUMBER_COLUMNS)
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+        raise ValueError("number_columns must be a sequence of column names")
+    names: List[str] = []
+    for name in value:
+        if not isinstance(name, str) or not name:
+            raise ValueError("number_columns entries must be non-empty strings")
+        names.append(name)
+    return names
+
 
 def _normalize_colors(colors: Any) -> Dict[str, str]:
     """Validate the optional ``colors=`` palette overrides (contract §3.2).
@@ -157,12 +174,14 @@ def _ipython_available() -> bool:
 def render_payload(
     payload: Dict[str, Any],
     colors: Optional[Dict[str, str]] = None,
+    number_columns: Optional[Sequence[str]] = None,
     on_created: Optional[Any] = None,
 ) -> None:
     """Display one payload through the panel frontend in an IPython session.
 
     Never raises; failures are logged so recording always outlives display.
-    ``colors`` carries user palette overrides to the panel (contract §4.2).
+    ``colors`` carries user palette overrides and ``number_columns`` selects
+    which detail columns use the number color (contract §4.2).
     ``on_created(panel)`` (when provided) runs after a successful panel
     construction and before ``display`` so callers can register the panel
     with their own syncer.
@@ -178,7 +197,11 @@ def render_payload(
         _LOGGER.exception("Panel frontend unavailable; payload not displayed")
         return
     try:
-        panel = VvvPanel(payload=payload, colors=colors or {})
+        panel = VvvPanel(
+            payload=payload,
+            colors=colors or {},
+            number_columns=list(number_columns or []),
+        )
         if on_created is not None:
             on_created(panel)
         display(panel)
@@ -342,6 +365,7 @@ class ViewWidget:
         fsync: bool = False,
         columns: Optional[Any] = None,
         colors: Optional[Mapping[str, str]] = None,
+        number_columns: Optional[Sequence[str]] = None,
     ) -> None:
         _validate_limit(display_limit)
         _validate_limit(live_rows)
@@ -353,6 +377,7 @@ class ViewWidget:
         else:
             schema_names, schema_types = _normalize_columns(columns)
         self._colors: Dict[str, str] = _normalize_colors(colors)
+        self._number_columns: List[str] = _normalize_number_columns(number_columns)
 
         self._lock = threading.RLock()
         self._logger = _LOGGER
@@ -520,7 +545,12 @@ class ViewWidget:
             self._selected_state = state
             self._selected_depth = self._resolve_depth(limit, full)
             payload = self._build_payload_locked(state, self._selected_depth)
-        render_payload(payload, colors=self._colors, on_created=self._syncer.attach)
+        render_payload(
+            payload,
+            colors=self._colors,
+            number_columns=self._number_columns,
+            on_created=self._syncer.attach,
+        )
 
     def plot(self, state: str = "state", limit: Optional[int] = None, full: bool = False) -> None:
         """Visualise the current window via pygwalker or the CSV fallback (3.2)."""

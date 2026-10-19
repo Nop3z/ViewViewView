@@ -63,7 +63,7 @@
 
 ## JupyterLab 实机验证（2026-10-19）
 
-在 JupyterLab 4.6.4 + ipywidgets 8.1.9 + anywidget 0.11.0 中实际执行 `dev/jupyter_demo.ipynb`（800 次注入），双窗、绿色计数与数值列（`#19ff25`）、列宽拖拽均正常，截图见 `dev/jupyter-live.png`。此轮验证发现并修复了两个**仅在 Jupyter 环境暴露**的问题：
+在 JupyterLab 4.6.4 + ipywidgets 8.1.9 + anywidget 0.11.0 中实际执行 `dev/jupyter_demo.ipynb`（800 次注入），双窗、绿色计数与 `delay`/`pulse` 列（`#19ff25`，`errcode` 保持白色）、列宽拖拽均正常，截图见 `dev/jupyter-live.png`。此轮验证发现并修复了两个**仅在 Jupyter 环境暴露**的问题：
 
 1. **anywidget 默认导出契约**：必须是 `export default { render }`；写成 `export default function render(...)` 时 anywidget 会以无参调用，前端报 `Cannot destructure property 'model' of 'undefined'`，widget 完全不渲染。已在 `index.mjs` 修正并加测试断言。
 2. **样式挂载位置**：anywidget 在 JupyterLab 中可能把 `_css` 注入普通 DOM（而非 shadow root），`:host` 上的 CSS 变量不生效，导致白底黑字。配色 tokens 已从 `:host` 移到 `.vvv-root`，两种挂载方式下都保持深色 + 白字 + 绿色计数（可自定义）。

@@ -35,7 +35,7 @@ ViewViewView 用纯 Python 重写了同一条数据通路，只保留必要环�
 - **CSV 自动落地**：默认以控件创建的起始时间命名（`YYYYMMDD-HHMMSS.csv`），也支持手动命名（含子目录）
 - **CSV-first 持久化**：每条结果先写入 CSV，再更新界面；与 FaultViz 的 CSV 格式兼容
 - **受限内存**：`live_rows` 环形窗口，任意注入量级内存恒定
-- **深色主题**：黑色背景、白色字符串文字、绿色计数与数值列（默认 `#19ff25`），颜色均可通过 `colors=` 自定义，适合暗室长时间盯屏
+- **深色主题**：黑色背景、白色字符串文字、绿色计数与 `delay`/`pulse` 数值列（均 `#19ff25`）；`errcode` 等其他数值列保持白色，颜色与高亮列均可通过 `colors=` / `number_columns=` 自定义
 - **线程安全**：`update/flush/close` 可在工作线程并发调用
 - **零前端依赖**：anywidget 单文件 ESM + Shadow DOM，不拉取 CDN、不需要 npm 构建
 
@@ -137,6 +137,16 @@ vt = faultviz.ViewWidget(
 - 未知 key、非十六进制值会抛 `ValueError`
 - 所有颜色在 widget 创建时一次性传入；默认计数色为 `#19ff25`
 
+### 哪些数值列显示绿色
+
+默认只有 `delay`、`pulse` 两列使用绿色，`errcode` 等其他数值列保持白色。用 `number_columns=` 可以自定义：
+
+```python
+vt = faultviz.ViewWidget(number_columns=["delay", "pulse", "voltage_mv"])
+```
+
+传空列表则所有明细列都不使用绿色；`state`/`reply` 等字符串列始终为白色。
+
 ### CSV-only 记录（不打开界面）
 
 ```python
@@ -166,7 +176,7 @@ faultviz.csvplot(path)                                             # pygwalker �
 | FaultViz API | ViewViewView | 说明 |
 | --- | --- | --- |
 | `start_view_service(port=12345, max_heap="2g")` | ✅ 同签名 | no-op，无需 JVM；参数被接受且不会抛异常 |
-| `ViewWidget(csv_path=None, display_limit=None, flush_every=1, live_rows=None, fsync=False)` | ✅ 同签名 + 可选 `columns=` | 语义一致，含合法性校验错误文案；`columns` 为向后兼容的扩展参数 |
+| `ViewWidget(csv_path=None, display_limit=None, flush_every=1, live_rows=None, fsync=False)` | ✅ 同签名 + 可选 `columns=` / `colors=` / `number_columns=` | 语义一致，含合法性校验错误文案；扩展参数均向后兼容 |
 | `widget.update(**kwargs) -> bool` | ✅ | 首行定 schema；类型/键不匹配返回 `False`；CSV 写失败抛异常并锁死实例 |
 | `widget.show(state="state", limit=None, full=False)` | ✅ | 上窗分类计数 + 下窗明细；`limit=0` 仅显示统计 |
 | `widget.plot(state="state", limit=None, full=False)` | ✅ | pygwalker 可用则交互绘图，否则降级 CSV 查看 |

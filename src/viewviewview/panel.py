@@ -71,7 +71,9 @@ if _ANYWIDGET_AVAILABLE:
         payload = T.Dict(default_value={}).tag(sync=True)
         theme = T.Unicode("dark").tag(sync=True)
         colors = T.Dict(default_value={}).tag(sync=True)
-
+        number_columns = T.List(
+            T.Unicode(), default_value=["delay", "pulse"]
+        ).tag(sync=True)
 else:
 
     class VvvPanel:  # type: ignore[no-redef]

@@ -39,7 +39,7 @@ def capture_show_payload(widget):
     captured = {}
     original = core.render_payload
 
-    def fake_render(payload, colors=None, on_created=None):
+    def fake_render(payload, colors=None, number_columns=None, on_created=None):
         captured["payload"] = payload
 
     core.render_payload = fake_render
