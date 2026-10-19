@@ -15,6 +15,7 @@ import logging
 import os
 import threading
 from collections import deque
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any, Deque, Dict, List, Optional, Tuple
 
@@ -33,6 +34,46 @@ _MAX_WINDOW_ROWS = 2000      # payload rows hard cap
 _FRAME_DELAY = 0.05          # Syncer frame-merge delay in seconds (4.1)
 
 _TYPE_NAMES: Dict[type, str] = {int: "int", float: "float", str: "str"}
+
+_DEFAULT_CSV_FORMAT = "%Y%m%d-%H%M%S"  # start-time based default file name
+
+
+def _normalize_columns(columns: Any) -> Tuple[List[str], List[Optional[type]]]:
+    """Validate a user supplied column definition (constructor ``columns=``).
+
+    Accepts either a mapping ``{name: int|float|str}`` (explicit types) or a
+    sequence of names (types are adopted from the first accepted record).
+    Column order is preserved; duplicate/empty/non-str names are rejected.
+    """
+    if isinstance(columns, Mapping):
+        names = list(columns.keys())
+        types: List[Optional[type]] = []
+        for name, value_type in columns.items():
+            if not isinstance(name, str) or not name:
+                raise ValueError("column names must be non-empty strings")
+            if value_type not in _TYPE_NAMES:
+                raise ValueError("column types must be exactly int, float or str")
+            types.append(value_type)
+        if not names:
+            raise ValueError("columns must not be empty")
+        return names, types
+
+    if isinstance(columns, (str, bytes)):
+        raise ValueError(
+            "columns must be a sequence of names or a mapping name -> int/float/str"
+        )
+    if not isinstance(columns, Sequence):
+        raise ValueError(
+            "columns must be a sequence of names or a mapping name -> int/float/str"
+        )
+    names = list(columns)
+    if not names:
+        raise ValueError("columns must not be empty")
+    if any(not isinstance(name, str) or not name for name in names):
+        raise ValueError("column names must be non-empty strings")
+    if len(set(names)) != len(names):
+        raise ValueError("columns must not contain duplicate names")
+    return names, [None] * len(names)
 
 
 def _validate_limit(limit: Any) -> None:
@@ -252,16 +293,24 @@ class ViewWidget:
         flush_every: int = 1,
         live_rows: Optional[int] = None,
         fsync: bool = False,
+        columns: Optional[Any] = None,
     ) -> None:
         _validate_limit(display_limit)
         _validate_limit(live_rows)
         _validate_flush_every(flush_every)
         _validate_fsync(fsync)
+        if columns is None:
+            schema_names: List[str] = []
+            schema_types: List[Optional[type]] = []
+        else:
+            schema_names, schema_types = _normalize_columns(columns)
 
         self._lock = threading.RLock()
         self._logger = _LOGGER
-        self._csv_path: Optional[str] = (
-            os.path.abspath(os.path.expanduser(csv_path)) if csv_path is not None else None
+        self._csv_path: str = (
+            os.path.abspath(os.path.expanduser(csv_path))
+            if csv_path is not None
+            else self._new_default_csv_path()
         )
         self._display_limit: Optional[int] = display_limit
         self._flush_every: int = flush_every
@@ -277,9 +326,12 @@ class ViewWidget:
         self._ring_max: int = ring_depth
         self._ring: Deque[Tuple[Any, ...]] = deque(maxlen=ring_depth) if ring_depth > 0 else deque()
 
-        self._schema: List[Tuple[str, type]] = []
-        self._schema_names: List[str] = []
-        self._schema_types: List[type] = []
+        self._schema: List[Tuple[str, Optional[type]]] = list(
+            zip(schema_names, schema_types)
+        )
+        self._schema_names: List[str] = schema_names
+        self._schema_types: List[Optional[type]] = schema_types
+        self._pending_types: bool = any(value_type is None for value_type in schema_types)
         self._counts: Dict[str, Dict[str, int]] = {}
         self._rows_written: int = 0
         self._rows_since_flush: int = 0
@@ -301,7 +353,7 @@ class ViewWidget:
     # ------------------------------------------------------------------
     @property
     def csv_path(self) -> Optional[str]:
-        """CSV file backing this widget; generated on first record by default."""
+        """Absolute CSV path, fixed at widget creation (start time by default)."""
         with self._lock:
             return self._csv_path
 
@@ -335,11 +387,10 @@ class ViewWidget:
             if self._csv_failed:
                 raise RuntimeError("CSV recording previously failed; create a new widget")
 
-            first_row = not self._schema_names
-            if first_row:
-                # Freeze the schema from the first *valid* record. Reject empty
-                # kwargs and any non-exact int/float/str value (bool, numpy
-                # scalars, None, ...) without touching CSV or memory.
+            if not self._schema_names:
+                # Legacy mode: freeze the schema from the first valid record.
+                # Reject empty kwargs and any non-exact int/float/str value
+                # (bool, numpy scalars, None, ...) before touching CSV/memory.
                 if not kwargs or any(type(value) not in _TYPE_NAMES for value in kwargs.values()):
                     self._logger.error(
                         "record names/types mismatch; supported types: int, float, str"
@@ -348,11 +399,20 @@ class ViewWidget:
                 self._schema_names = list(kwargs)
                 self._schema_types = [type(value) for value in kwargs.values()]
                 self._schema = list(zip(self._schema_names, self._schema_types))
-            elif not self._row_matches_schema(kwargs):
-                self._logger.error(
-                    "record names/types mismatch; supported types: int, float, str"
-                )
-                return False
+                self._pending_types = False
+            else:
+                if not self._row_matches_schema(kwargs):
+                    self._logger.error(
+                        "record names/types mismatch; supported types: int, float, str"
+                    )
+                    return False
+                if self._pending_types:
+                    # Names were declared up front; adopt exact types now.
+                    self._schema_types = [
+                        type(kwargs[name]) for name in self._schema_names
+                    ]
+                    self._schema = list(zip(self._schema_names, self._schema_types))
+                    self._pending_types = False
 
             self._write_record_locked(kwargs)
 
@@ -403,9 +463,11 @@ class ViewWidget:
         """Display the live payload in a new panel (contract 3.2)."""
         _validate_limit(limit)
         with self._lock:
-            if self._rows_written == 0:
+            if self._rows_written == 0 and not self._schema_names:
                 _LOGGER.info("No data recorded.")
                 return
+            if self._rows_written == 0:
+                _LOGGER.info("No data recorded yet; showing the declared columns.")
             self._selected_state = state
             self._selected_depth = self._resolve_depth(limit, full)
             payload = self._build_payload_locked(state, self._selected_depth)
@@ -461,11 +523,15 @@ class ViewWidget:
         if len(kwargs) != len(self._schema_names):
             return False
         for name, expected_type in self._schema:
-            try:
-                value = kwargs[name]
-            except KeyError:
+            if name not in kwargs:
                 return False
-            if type(value) is not expected_type:
+            value = kwargs[name]
+            if expected_type is None:
+                # Sequence-declared columns: any exact int/float/str is fine
+                # for this first record; the types are adopted afterwards.
+                if type(value) not in _TYPE_NAMES:
+                    return False
+            elif type(value) is not expected_type:
                 return False
         return True
 
@@ -497,25 +563,27 @@ class ViewWidget:
     def _open_csv_locked(self) -> None:
         """Lazily open (and validate) the CSV channel. Raises ValueError/OSError."""
         path = self._csv_path
-        if path is None:
-            path = self._generate_csv_path_locked()
+        if path is None:  # defensive; the path is fixed at construction
+            path = self._new_default_csv_path()
             self._csv_path = path
         had_records = self._validate_existing_csv_locked(path)
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         handle = open(path, "a", encoding="utf-8", newline="")
         self._csv_file = handle
         self._csv_writer = csv.writer(handle)
         if not had_records:
             self._csv_writer.writerow(self._schema_names)
 
-    def _generate_csv_path_locked(self) -> str:
-        """Generate a collision-avoiding absolute CSV path in the CWD (3.2/§5)."""
-        stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-        stem = f"viewviewview-{stamp}"
+    def _new_default_csv_path(self) -> str:
+        """Collision-safe absolute CSV name based on the start time (3.2/§5)."""
+        stamp = datetime.now().strftime(_DEFAULT_CSV_FORMAT)
         directory = os.getcwd()
-        candidate = os.path.join(directory, f"{stem}.csv")
+        candidate = os.path.join(directory, f"{stamp}.csv")
         counter = 1
         while os.path.exists(candidate):
-            candidate = os.path.join(directory, f"{stem}-{counter}.csv")
+            candidate = os.path.join(directory, f"{stamp}-{counter}.csv")
             counter += 1
         return candidate
 
@@ -597,17 +665,18 @@ class ViewWidget:
 
     def _build_payload_locked(self, state_key: Any, depth: int) -> Dict[str, Any]:
         """Snapshot payload per the frozen contract Section 4.3."""
-        column_types = [type_name for type_name in self._schema_types]
         columns = [
-            {"name": name, "type": _TYPE_NAMES.get(t, "str")}
-            for name, t in zip(self._schema_names, column_types)
+            {"name": name, "type": _TYPE_NAMES.get(value_type, "str")}
+            for name, value_type in zip(self._schema_names, self._schema_types)
         ]
-        if isinstance(state_key, str) and state_key in self._counts:
-            counts = dict(self._counts[state_key])
-            state_value: Optional[str] = state_key
-        else:
-            counts = {}
-            state_value = None
+        state_value: Optional[str] = None
+        counts: Dict[str, int] = {}
+        if isinstance(state_key, str) and state_key in self._schema_names:
+            index = self._schema_names.index(state_key)
+            column_type = self._schema_types[index]
+            if column_type is str or column_type is None:
+                state_value = state_key
+                counts = dict(self._counts.get(state_key, {}))
         rows = self._ring_window_locked(depth)
         self._version += 1
         return {

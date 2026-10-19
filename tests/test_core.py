@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import csv
+import re
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -69,8 +71,29 @@ def test_default_csv_path(tmp_path, monkeypatch):
     path = widget.csv_path
     assert path is not None
     assert path.startswith(str(tmp_path))
-    assert "viewviewview-" in path and path.endswith(".csv")
+    assert re.fullmatch(r"\d{8}-\d{6}(-\d+)?\.csv", Path(path).name)
     assert read_all(path)[1] == ["PASS", "1"]
+
+
+def test_default_csv_name_is_widget_start_time(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    widget = ViewWidget()
+    path = widget.csv_path
+    assert path is not None
+    assert not Path(path).exists()  # lazy creation
+    assert re.fullmatch(r"\d{8}-\d{6}(-\d+)?\.csv", Path(path).name)
+    widget.update(state="PASS", delay=1)
+    widget.close()
+    assert Path(path).exists()
+
+
+def test_manual_csv_name_and_parent_directories(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    widget = ViewWidget(csv_path="runs/my_experiment.csv")
+    assert widget.csv_path == str(tmp_path / "runs" / "my_experiment.csv")
+    widget.update(state="PASS", delay=1)
+    widget.close()
+    assert read_all(tmp_path / "runs" / "my_experiment.csv")[1] == ["PASS", "1"]
 
 
 def test_properties(tmp_path):
@@ -318,3 +341,112 @@ def test_syncer_pushes_to_panels(tmp_path):
     assert panel.payload["total"] >= 1
     widget.close()
     assert widget.syncer.panel_count() == 0
+
+
+def test_predefined_columns_mapping(tmp_path, monkeypatch):
+    import viewviewview.core as core
+
+    captured = {}
+    monkeypatch.setattr(
+        core,
+        "render_payload",
+        lambda payload, on_created=None: captured.update({"payload": payload}),
+    )
+    widget = ViewWidget(
+        csv_path=str(tmp_path / "a.csv"),
+        columns={
+            "state": str,
+            "delay": int,
+            "pulse": float,
+            "reply": str,
+            "errcode": int,
+        },
+    )
+    widget.show()  # declared columns must render before the first record
+    payload = captured["payload"]
+    assert [column["name"] for column in payload["columns"]] == [
+        "state",
+        "delay",
+        "pulse",
+        "reply",
+        "errcode",
+    ]
+    assert [column["type"] for column in payload["columns"]] == [
+        "str",
+        "int",
+        "float",
+        "str",
+        "int",
+    ]
+    assert payload["rows"] == []
+    assert payload["state_key"] == "state"
+
+    assert widget.update(state="PASS", delay=1, pulse=2.5, reply="ok", errcode=0) is True
+    assert widget.update(state="PASS", delay=1.5) is False  # missing keys
+    assert (
+        widget.update(state="PASS", delay="1", pulse=2.5, reply="ok", errcode=0) is False
+    )
+    widget.close()
+    assert read_all(tmp_path / "a.csv") == [
+        ["state", "delay", "pulse", "reply", "errcode"],
+        ["PASS", "1", "2.5", "ok", "0"],
+    ]
+
+
+def test_predefined_columns_sequence_infers_types(tmp_path):
+    widget = ViewWidget(
+        csv_path=str(tmp_path / "a.csv"), columns=["state", "delay", "pulse"]
+    )
+    assert widget.update(state="PASS", delay=1, pulse=2.5) is True
+    assert widget.update(state="PASS", delay=2.5) is False  # missing key
+    assert widget.update(state="PASS", delay=3, pulse=4.5) is True
+    assert widget.update(state="PASS", delay=3.2, pulse=4.5) is False  # int drift
+    widget.close()
+
+
+@pytest.mark.parametrize(
+    "columns",
+    [
+        ["a", "a"],
+        [],
+        ["a", 1],
+        {"a": bool},
+        {"": int},
+        {1: int},
+        "abc",
+        42,
+    ],
+)
+def test_predefined_columns_validation(columns):
+    with pytest.raises(ValueError):
+        ViewWidget(columns=columns)
+
+
+def test_predefined_columns_csv_header_mismatch(tmp_path):
+    path = tmp_path / "a.csv"
+    path.write_bytes(b"other,columns\r\nx,1\r\n")
+    widget = ViewWidget(csv_path=str(path), columns={"state": str, "delay": int})
+    with pytest.raises(ValueError, match="CSV header mismatch"):
+        widget.update(state="PASS", delay=1)
+    widget.close()
+
+
+def test_predefined_columns_push_after_empty_show(tmp_path):
+    class Panel:
+        payload = None
+
+    widget = ViewWidget(
+        csv_path=str(tmp_path / "a.csv"), columns={"state": str, "delay": int}
+    )
+    panel = Panel()
+    widget.syncer.attach(panel)
+    widget.show()  # empty skeleton, then live records arrive
+    widget.update(state="PASS", delay=1)
+    deadline = time.time() + 2.0
+    while (panel.payload is None or panel.payload["total"] < 2) and time.time() < deadline:
+        widget.update(state="PASS", delay=2)
+        time.sleep(0.03)
+    assert panel.payload is not None
+    assert panel.payload["total"] >= 2
+    assert panel.payload["rows"][0][1] == 2
+    widget.close()

@@ -65,11 +65,12 @@
   --vvv-panel: #232931;
   --vvv-header: #2b323a;
   --vvv-row-alt: #20252b;
-  --vvv-fg: #dfe3e8;
+  --vvv-fg: #ffffff;
   --vvv-fg-dim: #8b95a1;
   --vvv-accent: #3d6fe0;
   --vvv-border: #333b45;
   --vvv-live: #2ea043;
+  --vvv-count: #39ff14;
 
   background: var(--vvv-bg);
   box-sizing: border-box;
@@ -154,6 +155,13 @@
 
 .vvv-td--num {
   text-align: right;
+}
+
+/* Top-pane count values: neon green on dark, per the FaultViz look. */
+.vvv-count {
+  color: var(--vvv-count);
+  font-weight: 600;
+  text-shadow: 0 0 6px rgba(57, 255, 20, 0.25);
 }
 
 /* Zebra rows; hover highlights with the header tone. */
@@ -266,7 +274,8 @@ function renderPayload(root, payload) {
 
   // §3.2 limit=0 → counts-only payload (no detail pane); rows arrive
   // newest-first already (§4.3), so render them in array order as-is.
-  if (columns.length > 0 && rows.length > 0) {
+  // Declared columns render even before the first record (empty tbody).
+  if (columns.length > 0) {
     root.appendChild(buildDetailPane(columns, rows));
   }
 
@@ -338,7 +347,7 @@ function buildCountsTable(stateKey, counts) {
     const nameCell = document.createElement("td");
     nameCell.className = "vvv-td";
     const countCell = document.createElement("td");
-    countCell.className = "vvv-td vvv-td--num";
+    countCell.className = "vvv-td vvv-td--num vvv-count";
     nameCell.textContent = toDisplayText(bucket);
     countCell.textContent = toDisplayText(count);
     tr.appendChild(nameCell);

@@ -255,6 +255,38 @@ def test_csv_only(tmp):
     return "live_rows=0 records without panels"
 
 
+def test_predefined_columns(tmp):
+    path = tmp / "columns.csv"
+    widget = make_widget(path, columns={"state": str, "delay": int, "reply": str})
+    expect(widget.update(state="PASS", delay=1, reply="ok") is True, "first row rejected")
+    expect(widget.update(state="PASS", delay="x", reply="ok") is False, "type drift accepted")
+    widget.close()
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        rows = list(csv.reader(handle))
+    expect(rows[0] == ["state", "delay", "reply"], f"header {rows[0]}")
+    expect(rows[1] == ["PASS", "1", "ok"], f"row {rows[1]}")
+    return "columns= mapping predefines schema"
+
+
+def test_start_time_filename(tmp):
+    import os
+    import re
+
+    previous = os.getcwd()
+    os.chdir(tmp)
+    try:
+        widget = viewviewview.ViewWidget()
+        name = os.path.basename(widget.csv_path or "")
+        expect(bool(re.fullmatch(r"\d{8}-\d{6}(-\d+)?\.csv", name)), f"name {name}")
+        expect(not os.path.exists(widget.csv_path), "file must be created on first write")
+        widget.update(state="PASS", delay=1)
+        expect(os.path.exists(widget.csv_path), "CSV missing after first write")
+        widget.close()
+    finally:
+        os.chdir(previous)
+    return "default name = widget start time"
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix="vvv-smoke-") as directory:
         tmp = Path(directory)
@@ -271,6 +303,8 @@ def main():
         check("11 thread safety", lambda: test_threads(tmp))
         check("12 compat no-op exports", lambda: test_compat_noop(tmp))
         check("13 csv-only mode", lambda: test_csv_only(tmp))
+        check("14 predefined columns", lambda: test_predefined_columns(tmp))
+        check("15 start-time default filename", lambda: test_start_time_filename(tmp))
 
     failures = [item for item in RESULTS if not item[1]]
     for name, ok, detail in RESULTS:

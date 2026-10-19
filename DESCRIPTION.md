@@ -12,7 +12,7 @@
 **ViewViewView** 是为硬件安全故障注入实验打造的实时结果记录与可视化工具。在一轮注入扫描中（动辄数万至数十万次注入），研究者最关心两件事：当前命中了哪些结果分类，以及最新一次注入的完整参数。ViewViewView 用**上下双窗**直观呈现：
 
 - **上窗 · 分类统计窗**：按分类字段（默认 `state`，可指定任意 str 列）实时统计注入次数，如 `PASS: 8 932 / FAIL: 41 / TIMEOUT: 12`；
-- **下窗 · 结果明细窗**：滚动展示注入详细参数——`delay`、`pulse`、`reply`、`errcode` 等，最新一次置顶；列名、列数完全由实验脚本自定义，首行数据即定 schema（支持 `int` / `float` / `str`），也可显式声明列集。
+- **下窗 · 结果明细窗**：滚动展示注入详细参数——`delay`、`pulse`、`reply`、`errcode` 等，最新一次置顶；列名、列数完全由实验脚本自定义：可在实例化时用 `columns=` 显式声明（列名 + `int`/`float`/`str` 类型，启动即显示空表头），也可由第一条 `update()` 自动定义 schema。
 
 ViewViewView 是 [FaultViz](https://gitee.com/osr-tech/faultviz)（v1.1.0）的**独立兼容重实现**，针对其笨重易卡死的痛点彻底重构：
 
@@ -29,6 +29,18 @@ ViewViewView 是 [FaultViz](https://gitee.com/osr-tech/faultviz)（v1.1.0）的*
 - import faultviz
 + import viewviewview as faultviz
 ```
+
+实例化时可自由定义字段与 CSV 文件名：
+
+```python
+vt = faultviz.ViewWidget(
+    columns={"state": str, "delay": int, "pulse": int, "reply": str, "errcode": int},
+    csv_path="runs/my_experiment.csv",   # 可选；默认以实验开始时间命名
+)
+vt.show()
+```
+
+CSV 默认落地为控件创建时刻的文件名（如 `20261019-213005.csv`），也支持手动命名；界面采用 FaultViz 风格深色主题——白色字段文字、荧光绿计数。
 
 **非目标**：ViewViewView 不试图重新发明故障注入攻击框架，不绑定任何注入设备与厂商；它只专注把“扫描参数 → 判定结果 → 记录 → 观察”这一环做得又轻又稳。
 

@@ -62,7 +62,8 @@ function renderPayload(root, payload) {
 
   // §3.2 limit=0 → counts-only payload (no detail pane); rows arrive
   // newest-first already (§4.3), so render them in array order as-is.
-  if (columns.length > 0 && rows.length > 0) {
+  // Declared columns render even before the first record (empty tbody).
+  if (columns.length > 0) {
     root.appendChild(buildDetailPane(columns, rows));
   }
 
@@ -134,7 +135,7 @@ function buildCountsTable(stateKey, counts) {
     const nameCell = document.createElement("td");
     nameCell.className = "vvv-td";
     const countCell = document.createElement("td");
-    countCell.className = "vvv-td vvv-td--num";
+    countCell.className = "vvv-td vvv-td--num vvv-count";
     nameCell.textContent = toDisplayText(bucket);
     countCell.textContent = toDisplayText(count);
     tr.appendChild(nameCell);

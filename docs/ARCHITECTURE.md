@@ -14,7 +14,10 @@
   - D4 支持 Python ≥ 3.9。
   - D5 配色：深色（Deephaven 深色主题基调）。
   - D6 **Clean-room**：所有实现依据本契约，**禁止阅读** `D:\project\faultviz_reference\` 下任何源码。缺口与本契约冲突一律走 §9 流程。
-  - D7 与 FaultViz 的有意偏差（README 中向用户声明）：`start_view_service` 变为可选 no-op；默认 CSV 文件名前缀 `viewviewview-*.csv`；明细窗默认深度 200 行；`plot/csvplot` 中 pygwalker 为可选依赖。
+  - D7 与 FaultViz 的有意偏差（README 中向用户声明）：`start_view_service` 变为可选 no-op；明细窗默认深度 200 行；`plot/csvplot` 中 pygwalker 为可选依赖；新增可选 `columns=` 扩展参数。
+  - D8 字段自定义扩展：`ViewWidget(..., columns=...)` 支持映射 `{name: int|float|str}`（显式类型）或名称序列（类型由首条记录推断）；未传时保持 FaultViz“首行定 schema”行为。预声明 schema 时 `show()` 可渲染带表头的空表骨架。
+  - D9 CSV 默认文件名 = 控件创建（实验开始）时刻：`YYYYMMDD-HHMMSS.csv`，同名冲突追加 `-1`；仍支持 `csv_path=` 手动命名（自动创建父目录）。
+  - D10 视觉：深色主题；字段文字纯白 `#ffffff`，上窗计数值荧光绿 `#39ff14`（FaultViz 观感）。
 - 参考工具链：核心依赖仅 `anywidget`；`pygwalker`/`pandas` 仅 plot 路径使用（extras）；打包 hatchling。
 
 ## 1. 包结构与文件所有权矩阵（防并行冲突）
@@ -41,9 +44,10 @@
 ### 3.1 `start_view_service(port=12345, max_heap="2g") -> None`
 No-op：校验后记录日志 `"Deephaven service not required; live rendering is local"` 并返回。多次调用、任意参数不得抛异常。为兼容保留签名（接受任意 port：int 类型校验与非负校验；max_heap 接受 str 或 None）。
 
-### 3.2 `ViewWidget(csv_path=None, display_limit=None, flush_every=1, live_rows=None, fsync=False)`
+### 3.2 `ViewWidget(csv_path=None, display_limit=None, flush_every=1, live_rows=None, fsync=False, columns=None)`
 构造校验（语义/错误消息与 FaultViz 相同）：`display_limit`、`live_rows` 须为非负 int 或 None，否则 `ValueError("limit must be a non-negative integer or None")`；`flush_every` 须为正 int，否则 `ValueError("flush_every must be a positive integer")`；`fsync` 须为 bool，否则 `ValueError("fsync must be a bool")`。
-属性：`csv_path -> Optional[str]`（默认将在首行落盘前自动生成），`rows_written -> int`。
+`columns`（向后兼容扩展）：`None` = 首行定 schema；`Mapping[str, int|float|str]` = 列名/列序/类型全部显式；序列 `[name, ...]` = 仅固定列名/列序，类型由首条合法记录推断。非法输入（空、重名、非字符串名、非 int/float/str 类型）抛 `ValueError`。
+属性：`csv_path -> str`（绝对路径；默认在实例化时按起始时间生成 `YYYYMMDD-HHMMSS.csv`，文件在首条合法记录时才创建），`rows_written -> int`。
 上下文管理器协议 + `close()` 幂等可重入。
 
 #### `update(**kwargs) -> bool`
@@ -60,7 +64,8 @@ No-op：校验后记录日志 `"Deephaven service not required; live rendering i
 flush 语义：每 `flush_every` 条 pending 后自动 `flush()`；`flush()` 刷新 pending 且 `fsync=True` 时额外 `os.fsync`。写失败后不得静默续写。
 
 #### `show(state="state", limit=None, full=False) -> None`
-- 无数据（rows_written==0）：`logger.info("No data recorded.")`，不显示任何面板。
+- 无数据且未预声明 schema（`rows_written==0`）：`logger.info("No data recorded.")`，不显示任何面板。
+- 已通过 `columns=` 预声明 schema 但尚无数据：渲染带表头的空表骨架（上窗计数为空），便于注入开始前确认字段。
 - 渲染：实例化 `VvvPanel`（§4.2）并 `IPython.display.display`；非 IPython 环境 `logger.warning("No IPython display environment available")`，不抛异常。
 - 有效 limit：`limit is None and not full` 时取 `display_limit`，否则取 `limit`（`0` = 只显示上窗分类计数）。`full=True` 显示完整内存窗口。
 - 分类列 `state` 不在 schema 中 → 面板 payload 置 `state_key=None`，上窗空态（faultviz 侧为隐藏计数表，等效）。
@@ -113,18 +118,19 @@ CSV 值类型：int/float 原样，str 原样；`state_key` 对应列值以 `str
 
 ### 4.4 前端规格 — B 实现（Deephaven 深色基调）
 - 布局：单容器两窗。上窗“分类统计”（表头 `state 桶 | count`，高度自适应≈150px），下窗明细（schema 列，sticky 表头，斑马纹，最新行置顶）。数字等宽 `font-variant-numeric: tabular-nums`。
-- 主题 tokens（styles.css `:host` 变量，Deephaven 深色近似）：`--vvv-bg:#1c2126; --vvv-panel:#232931; --vvv-header:#2b323a; --vvv-row-alt:#20252b; --vvv-fg:#dfe3e8; --vvv-fg-dim:#8b95a1; --vvv-accent:#3d6fe0; --vvv-border:#333b45; --vvv-live:#2ea043;` 允许在实现中微调，但整体保持深色、蓝紫强调、低饱和。
+- 主题 tokens（styles.css `:host` 变量，Deephaven 深色近似）：`--vvv-bg:#1c2126; --vvv-panel:#232931; --vvv-header:#2b323a; --vvv-row-alt:#20252b; --vvv-fg:#ffffff; --vvv-fg-dim:#8b95a1; --vvv-accent:#3d6fe0; --vvv-border:#333b45; --vvv-live:#2ea043; --vvv-count:#39ff14;`。字段文字使用纯白，上窗“计数”列使用荧光绿（`--vvv-count`）并加粗；允许微调，但保持深色、白字、荧光绿计数基调。
 - DOM 构造**只用 textContent/createElement**，禁 innerHTML（载荷字符串不可信 = 防注入）。
 - 渲染性能：≤200 行全量重绘 + DocumentFragment，无虚拟化框架、零 npm 依赖、纯单文件 ESM。
 - `dev/preview.html`：静态 mock（含 state/delay/pulse/reply/errcode 示例载荷、≥30 行），浏览器直开可独立预览双窗效果（用于无需 Jupyter 的视觉验收）。
 
 ## 5. CSV 格式规范（与 FaultViz 二进制级兼容）
 - UTF-8；`csv.writer` 默认 dialect（`,` 分隔、`"` 引用、`\r\n` 行尾）；首行 header = 列名原样；值顺序 = schema 顺序；无索引列。
+- 默认文件名：控件创建时刻 `YYYYMMDD-HHMMSS.csv`（同名冲突追加 `-1`、`-2`）；`csv_path=` 可手动指定相对/绝对路径，父目录自动创建。
 - 验收基线：`viewviewview` 写出的 CSV 可被 FaultViz 的 `csvview`/`csvplot`（即 pandas/deephaven read_csv）无损读取。
 
 ## 6. 里程碑与验收
 
-- M1 核心 + 兼容层（A）：`scripts/smoke_core.py`：1000 次 update < 1s（fsync=False, flush_every=100）；CSV 回读与内存 counts 一致；契约 §3.1–§3.2 全语义自检全部 PASS。
+- M1 核心 + 兼容层（A）：`scripts/smoke_core.py`：1000 次 update < 1s（fsync=False, flush_every=100）；CSV 回读与内存 counts 一致；契约 §3.1–§3.2 全语义自检（含 `columns=` 预声明与起始时间文件名）全部 PASS。
 - M1' 展示（B，与 M1 并行）：preview.html 视觉达标 + §4.3 载荷渲染契约满足。
 - M2 集成（Lead）：`__init__` 懒导出联调、panel 与 core 挂通、console 干净。
 - M3 测试（C）：全绿 + 压测：10 万行 CSV-only < 90s；MRI 增幅 < 40MB（live_rows=1000）；`update` 纯记录路径 p95 < 50µs；载荷 ≤ 250KB@200rows。

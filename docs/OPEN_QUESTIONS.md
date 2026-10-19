@@ -7,3 +7,6 @@
 - [x] B1 RESOLVED（展示，2026-10-19）：主题仅实现 `dark`（D5）；`theme` trait 与 `data-vvv-theme` 属性已保留，未来可扩展浅色/跟随 JupyterLab 主题，无需改协议。
 - [x] B2 RESOLVED（展示，2026-10-19）：上窗分类桶按**首次出现顺序**（dict 插入序）展示，不做额外排序；与 FaultViz `count_by` 的呈现方式一致，避免每次刷新导致行位置跳动。
 - [x] R3 RESOLVED（架构师，2026-10-19）：`csvplot` 缺 pygwalker 时的日志文案与 §3.4 的 `plot` 文案区分——“showing the table view instead” 明确告知已降级为双窗表格；行为不变（不抛异常）。
+- [x] R4 RESOLVED（所有者需求，2026-10-19）：字段自定义前移到实例化阶段——新增可选 `columns=`（映射显式类型 / 序列仅列名），未传时保持首行定 schema。契约 D8 与 §3.2 已更新。
+- [x] R5 RESOLVED（所有者需求，2026-10-19）：CSV 默认文件名改为控件创建（实验开始）时刻 `YYYYMMDD-HHMMSS.csv`；`csv_path=` 手动命名保持不变并自动创建父目录。契约 D9 与 §5 已更新。
+- [x] R6 RESOLVED（所有者需求，2026-10-19）：配色为深色背景 + 纯白字段文字 + 荧光绿计数（`#39ff14`）。契约 D10 与 §4.4 已更新，前端与预览页同步。
