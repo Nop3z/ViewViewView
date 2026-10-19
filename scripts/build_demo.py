@@ -178,14 +178,15 @@ if (params.has("resize")) {
   requestAnimationFrame(() => {
     const table = shadow.querySelector("table.vvv-table--detail");
     if (!table) return;
-    const handle = table.querySelectorAll(".vvv-resize")[1];
+    const handles = table.querySelectorAll(".vvv-resize");
+    const handle = handles[handles.length - 1];
     if (!handle) return;
     const rect = handle.getBoundingClientRect();
     const startX = rect.left + rect.width / 2;
     const pointer = { bubbles: true, button: 0, pointerId: 11 };
     handle.dispatchEvent(new PointerEvent("pointerdown", { ...pointer, clientX: startX }));
-    handle.dispatchEvent(new PointerEvent("pointermove", { ...pointer, clientX: startX - 210 }));
-    handle.dispatchEvent(new PointerEvent("pointerup", { ...pointer, clientX: startX - 210 }));
+    handle.dispatchEvent(new PointerEvent("pointermove", { ...pointer, clientX: startX + 160 }));
+    handle.dispatchEvent(new PointerEvent("pointerup", { ...pointer, clientX: startX + 160 }));
   });
 }
 """
@@ -201,7 +202,7 @@ DEMO_HTML = """<!doctype html>
   body { background:#14181d; color:#e6ebf1; font-family:system-ui,"Segoe UI","Microsoft YaHei",sans-serif; margin:0; padding:20px 28px 32px; }
   h1 { font-size:18px; margin:0 0 4px; }
   p.meta { color:#8b95a1; font-size:12px; margin:0 0 10px; }
-  #vvv-mode { color:#39ff14; font-size:12px; margin-left:8px; }
+  #vvv-mode { color:#8b95a1; font-size:12px; margin-left:8px; }
   button { background:#2b323a; border:1px solid #333b45; border-radius:6px; color:#dfe3e8; cursor:pointer; font-size:12px; margin:0 8px 10px 0; padding:6px 14px; }
   button:hover { background:#3d6fe0; border-color:#3d6fe0; color:#fff; }
   #vvv-preview { height:620px; }
@@ -246,7 +247,7 @@ GALLERY_HTML = """<!doctype html>
   <h1>ViewViewView · 实测效果</h1>
   <p class="lead">真实 Python 核心产出的载荷（__ROWS__ 次模拟注入），经 bundled 前端渲染；列宽图为合成拖拽后的效果。</p>
   <div class="shot"><img src="demo-empty.png" alt="empty"><p class="cap">① 实例化 columns=... 后 vt.show()：5 列空表骨架，尚未注入</p></div>
-  <div class="shot"><img src="demo-live.png" alt="live"><p class="cap">② 真实运行结果：上窗分类计数（荧光绿）、下窗最新 1000 行明细（live_rows 窗口）、底部总数与 live 状态</p></div>
+  <div class="shot"><img src="demo-live.png" alt="live"><p class="cap">② 真实运行结果：上窗分类计数（白色）、下窗最新 1000 行明细（live_rows 窗口）、底部总数与 live 状态</p></div>
   <div class="shot"><img src="demo-resize.png" alt="resize"><p class="cap">③ 拖动表头分隔线：state 列收窄、delay 列加宽（宽度在实时刷新间保持）</p></div>
 </body>
 </html>

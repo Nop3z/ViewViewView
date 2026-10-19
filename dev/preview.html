@@ -48,11 +48,11 @@
  * Palette tokens are declared on `.vvv-root` rather than `:host`: anywidget
  * may inject this stylesheet into the light DOM (ipywidgets fallback) where
  * `:host` never matches. `.vvv-root` exists in both rendering modes, so the
- * dark palette and the white/neon-green colors are identical in JupyterLab,
+ * dark palette and the white text/count colors are identical in JupyterLab,
  * Voilà and the standalone preview page.
  *
  * Palette: Deephaven dark-tone approximation — near-black surfaces, pure white
- * field text, neon-green count values (decisions D5/D10).
+ * field and count text (decisions D5/D10).
  */
 
 :host {
@@ -69,7 +69,7 @@
   --vvv-accent: #3d6fe0;
   --vvv-border: #333b45;
   --vvv-live: #2ea043;
-  --vvv-count: #39ff14;
+  --vvv-count: #ffffff;
 
   background: var(--vvv-bg);
   box-sizing: border-box;
@@ -185,11 +185,10 @@
   text-align: right;
 }
 
-/* Top-pane count values: neon green on dark, per the FaultViz look. */
+/* Count values follow the FaultViz look: same foreground as other fields,
+   only right-aligned. Override --vvv-count to tint them if desired. */
 .vvv-count {
   color: var(--vvv-count);
-  font-weight: 600;
-  text-shadow: 0 0 6px rgba(57, 255, 20, 0.25);
 }
 
 /* Zebra rows; hover highlights with the header tone. */
@@ -797,14 +796,15 @@ if (new URLSearchParams(location.search).has("resize")) {
   requestAnimationFrame(() => {
     const table = shadow.querySelector("table.vvv-table--detail");
     if (!table) return;
-    const handle = table.querySelectorAll(".vvv-resize")[1];
+    const handles = table.querySelectorAll(".vvv-resize");
+    const handle = handles[handles.length - 1];
     if (!handle) return;
     const rect = handle.getBoundingClientRect();
     const startX = rect.left + rect.width / 2;
     const pointer = { bubbles: true, button: 0, pointerId: 7 };
     handle.dispatchEvent(new PointerEvent("pointerdown", { ...pointer, clientX: startX }));
-    handle.dispatchEvent(new PointerEvent("pointermove", { ...pointer, clientX: startX - 220 }));
-    handle.dispatchEvent(new PointerEvent("pointerup", { ...pointer, clientX: startX - 220 }));
+    handle.dispatchEvent(new PointerEvent("pointermove", { ...pointer, clientX: startX + 160 }));
+    handle.dispatchEvent(new PointerEvent("pointerup", { ...pointer, clientX: startX + 160 }));
   });
 }
 

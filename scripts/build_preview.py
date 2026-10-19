@@ -131,14 +131,15 @@ if (new URLSearchParams(location.search).has("resize")) {
   requestAnimationFrame(() => {
     const table = shadow.querySelector("table.vvv-table--detail");
     if (!table) return;
-    const handle = table.querySelectorAll(".vvv-resize")[1];
+    const handles = table.querySelectorAll(".vvv-resize");
+    const handle = handles[handles.length - 1];
     if (!handle) return;
     const rect = handle.getBoundingClientRect();
     const startX = rect.left + rect.width / 2;
     const pointer = { bubbles: true, button: 0, pointerId: 7 };
     handle.dispatchEvent(new PointerEvent("pointerdown", { ...pointer, clientX: startX }));
-    handle.dispatchEvent(new PointerEvent("pointermove", { ...pointer, clientX: startX - 220 }));
-    handle.dispatchEvent(new PointerEvent("pointerup", { ...pointer, clientX: startX - 220 }));
+    handle.dispatchEvent(new PointerEvent("pointermove", { ...pointer, clientX: startX + 160 }));
+    handle.dispatchEvent(new PointerEvent("pointerup", { ...pointer, clientX: startX + 160 }));
   });
 }
 """

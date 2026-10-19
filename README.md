@@ -35,7 +35,7 @@ ViewViewView 用纯 Python 重写了同一条数据通路，只保留必要环�
 - **CSV 自动落地**：默认以控件创建的起始时间命名（`YYYYMMDD-HHMMSS.csv`），也支持手动命名（含子目录）
 - **CSV-first 持久化**：每条结果先写入 CSV，再更新界面；与 FaultViz 的 CSV 格式兼容
 - **受限内存**：`live_rows` 环形窗口，任意注入量级内存恒定
-- **深色主题**：黑色背景、白色字段文字、荧光绿计数，对齐 FaultViz 观感，适合暗室长时间盯屏
+- **深色主题**：黑色背景、白色文字与计数，对齐 FaultViz 观感，适合暗室长时间盯屏
 - **线程安全**：`update/flush/close` 可在工作线程并发调用
 - **零前端依赖**：anywidget 单文件 ESM + Shadow DOM，不拉取 CDN、不需要 npm 构建
 

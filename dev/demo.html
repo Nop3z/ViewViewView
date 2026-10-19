@@ -9,7 +9,7 @@
   body { background:#14181d; color:#e6ebf1; font-family:system-ui,"Segoe UI","Microsoft YaHei",sans-serif; margin:0; padding:20px 28px 32px; }
   h1 { font-size:18px; margin:0 0 4px; }
   p.meta { color:#8b95a1; font-size:12px; margin:0 0 10px; }
-  #vvv-mode { color:#39ff14; font-size:12px; margin-left:8px; }
+  #vvv-mode { color:#8b95a1; font-size:12px; margin-left:8px; }
   button { background:#2b323a; border:1px solid #333b45; border-radius:6px; color:#dfe3e8; cursor:pointer; font-size:12px; margin:0 8px 10px 0; padding:6px 14px; }
   button:hover { background:#3d6fe0; border-color:#3d6fe0; color:#fff; }
   #vvv-preview { height:620px; }
@@ -29,16 +29,21 @@
   <script type="text/plain" id="vvv-css-src">/*
  * ViewViewView dual-pane widget styles — ARCHITECTURE.md §4.4.
  *
- * anywidget injects this file into the widget shadow root, so palette tokens
- * are declared on `:host` to stay isolated to this component, and every
- * visible element carries a `.vvv-` class prefix.
+ * Palette tokens are declared on `.vvv-root` rather than `:host`: anywidget
+ * may inject this stylesheet into the light DOM (ipywidgets fallback) where
+ * `:host` never matches. `.vvv-root` exists in both rendering modes, so the
+ * dark palette and the white text/count colors are identical in JupyterLab,
+ * Voilà and the standalone preview page.
  *
- * Palette: Deephaven dark-tone approximation — near-black surfaces, soft
- * off-white foreground, blue accent, low saturation overall (decision D5).
- * Hex values follow §4.4 verbatim (allowed micro-tuning was not needed).
+ * Palette: Deephaven dark-tone approximation — near-black surfaces, pure white
+ * field and count text (decisions D5/D10).
  */
 
 :host {
+  display: block;
+}
+
+.vvv-root {
   --vvv-bg: #1c2126;
   --vvv-panel: #232931;
   --vvv-header: #2b323a;
@@ -48,33 +53,24 @@
   --vvv-accent: #3d6fe0;
   --vvv-border: #333b45;
   --vvv-live: #2ea043;
-  --vvv-count: #39ff14;
+  --vvv-count: #ffffff;
 
   background: var(--vvv-bg);
   box-sizing: border-box;
   color: var(--vvv-fg);
-  display: block;
+  display: flex;
+  flex-direction: column;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
     Arial, "Microsoft YaHei", sans-serif;
   font-size: 13px;
+  gap: 10px;
   height: 100%;
   line-height: 1.45;
   max-height: 640px;
   min-height: 320px;
+  padding: 10px 12px;
   scrollbar-color: var(--vvv-border) transparent;
   scrollbar-width: thin;
-}
-
-/* Two-pane layout: counts pane ≈150px caps, detail pane fills the remainder. */
-.vvv-root {
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  height: 100%;
-  max-height: 640px;
-  min-height: 320px;
-  padding: 10px 12px;
 }
 
 .vvv-pane {
@@ -99,7 +95,10 @@
 .vvv-table {
   border-collapse: collapse;
   font-variant-numeric: tabular-nums;
-  width: 100%;
+  /* Compact by default: columns hug their content instead of being stretched
+     across the pane (FaultViz-like). Drag a header divider to fine-tune. */
+  width: max-content;
+  min-width: 0;
 }
 
 /* Explicit widths (after the user drags a divider) switch to fixed layout. */
@@ -113,7 +112,7 @@
   border-bottom: 1px solid var(--vvv-border);
   color: var(--vvv-fg);
   font-weight: 600;
-  padding: 6px 12px;
+  padding: 6px 10px;
   position: sticky;
   text-align: left;
   top: 0;
@@ -151,14 +150,6 @@
   );
 }
 
-/* While dragging a divider: signal resize + stop text selection inside the
-   widget (shadow-DOM scoped, so document-level body rules would not apply). */
-.vvv-root--resizing,
-.vvv-root--resizing * {
-  cursor: col-resize !important;
-  user-select: none !important;
-}
-
 .vvv-th--num {
   text-align: right;
 }
@@ -168,7 +159,7 @@
   color: var(--vvv-fg);
   max-width: 480px;
   overflow: hidden;
-  padding: 4px 12px;
+  padding: 4px 10px;
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -178,11 +169,10 @@
   text-align: right;
 }
 
-/* Top-pane count values: neon green on dark, per the FaultViz look. */
+/* Count values follow the FaultViz look: same foreground as other fields,
+   only right-aligned. Override --vvv-count to tint them if desired. */
 .vvv-count {
   color: var(--vvv-count);
-  font-weight: 600;
-  text-shadow: 0 0 6px rgba(57, 255, 20, 0.25);
 }
 
 /* Zebra rows; hover highlights with the header tone. */
@@ -229,6 +219,14 @@
   height: 6px;
   width: 6px;
 }
+
+/* While dragging a divider: signal resize + stop text selection inside the
+   widget (shadow-DOM scoped, so document-level body rules would not apply). */
+.vvv-root--resizing,
+.vvv-root--resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
 </script>
   <script type="module">
 /*
@@ -257,7 +255,7 @@ const MIN_COLUMN_WIDTH = 56;
  * @param {HTMLElement} el Shadow-DOM element owned by anywidget.
  * @returns {() => void} Teardown function, called by anywidget on view removal.
  */
-export default function render({ model, el }) {
+function render({ model, el }) {
   const root = document.createElement("div");
   root.className = "vvv-root";
   applyTheme(root, model.get("theme"));
@@ -661,6 +659,11 @@ function clearChildren(node) {
   }
 }
 
+// anywidget contract: the default export is a view definition object whose
+// ``render`` method receives ``{ model, el }``. Exporting a bare function here
+// makes anywidget invoke it without arguments and breaks model initialisation.
+export default { render };
+
 
 
 /* ---- demo bootstrap (not part of index.mjs) ---- */
@@ -729,14 +732,15 @@ if (params.has("resize")) {
   requestAnimationFrame(() => {
     const table = shadow.querySelector("table.vvv-table--detail");
     if (!table) return;
-    const handle = table.querySelectorAll(".vvv-resize")[1];
+    const handles = table.querySelectorAll(".vvv-resize");
+    const handle = handles[handles.length - 1];
     if (!handle) return;
     const rect = handle.getBoundingClientRect();
     const startX = rect.left + rect.width / 2;
     const pointer = { bubbles: true, button: 0, pointerId: 11 };
     handle.dispatchEvent(new PointerEvent("pointerdown", { ...pointer, clientX: startX }));
-    handle.dispatchEvent(new PointerEvent("pointermove", { ...pointer, clientX: startX - 210 }));
-    handle.dispatchEvent(new PointerEvent("pointerup", { ...pointer, clientX: startX - 210 }));
+    handle.dispatchEvent(new PointerEvent("pointermove", { ...pointer, clientX: startX + 160 }));
+    handle.dispatchEvent(new PointerEvent("pointerup", { ...pointer, clientX: startX + 160 }));
   });
 }
 
