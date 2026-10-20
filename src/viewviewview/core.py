@@ -23,7 +23,6 @@ from typing import Any, Deque, Dict, List, Optional, Tuple
 __all__ = [
     "ViewWidget",
     "Syncer",
-    "Hex",
     "_TailReader",
     "render_payload",
 ]
@@ -56,77 +55,6 @@ _COLOR_KEYS = frozenset(
     }
 )
 _HEX_COLOR = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
-_HEX_VALUE = re.compile(r"^(?:0[xX])?[0-9a-fA-F]+$")
-
-
-class Hex:
-    """Marker column type for hexadecimal values (contract D14).
-
-    Declare with ``ViewWidget(columns={"word": Hex})`` or fix the width with
-    ``Hex(8)``. Accepted inputs are non-negative ``int`` values (including
-    ``0x`` literals, which are ints in Python) and strings like ``"0x1a2b"``;
-    values are recorded and displayed canonically as ``0x...``.
-    """
-
-    def __init__(self, width: Optional[int] = None) -> None:
-        if width is not None and (type(width) is not int or width <= 0):
-            raise ValueError("Hex width must be a positive integer or None")
-        self.width = width
-
-    def __repr__(self) -> str:
-        return "Hex" if self.width is None else f"Hex(width={self.width})"
-
-
-def _is_hex_type(value_type: Any) -> bool:
-    return value_type is Hex or isinstance(value_type, Hex)
-
-
-def _hex_spec(value_type: Any) -> Hex:
-    return value_type if isinstance(value_type, Hex) else Hex()
-
-
-def _type_name(value_type: Any) -> str:
-    """Payload type label for a schema type."""
-    if _is_hex_type(value_type):
-        return "hex"
-    return _TYPE_NAMES.get(value_type, "str")
-
-
-def _coerce_hex(value: Any, spec: Hex) -> Optional[str]:
-    """Return the canonical ``0x...`` text, or None when invalid."""
-    if type(value) is int:
-        number = value
-    elif type(value) is str:
-        text = value.strip()
-        if not _HEX_VALUE.match(text):
-            return None
-        number = int(text, 16)
-    else:
-        return None
-    if number < 0:
-        return None
-    if spec.width is not None:
-        if number >= 16**spec.width:
-            return None
-        return f"0x{number:0{spec.width}X}"
-    return f"0x{number:X}"
-
-
-def _value_fits_type(value: Any, expected_type: Any) -> bool:
-    if expected_type is None:
-        return type(value) in _TYPE_NAMES
-    if _is_hex_type(expected_type):
-        return _coerce_hex(value, _hex_spec(expected_type)) is not None
-    return type(value) is expected_type
-
-
-def _coerce_value(value: Any, expected_type: Any) -> Any:
-    if _is_hex_type(expected_type):
-        coerced = _coerce_hex(value, _hex_spec(expected_type))
-        if coerced is None:  # defensive; validation ran before this
-            raise ValueError("invalid hex value")
-        return coerced
-    return value
 
 # Columns that use the "number" color (#19ff25) by default.
 _DEFAULT_NUMBER_COLUMNS = ("delay", "pulse")
@@ -169,7 +97,7 @@ def _normalize_colors(colors: Any) -> Dict[str, str]:
     return normalized
 
 
-def _normalize_columns(columns: Any) -> Tuple[List[str], List[Any]]:
+def _normalize_columns(columns: Any) -> Tuple[List[str], List[Optional[type]]]:
     """Validate a user supplied column definition (constructor ``columns=``).
 
     Accepts either a mapping ``{name: int|float|str}`` (explicit types) or a
@@ -182,8 +110,8 @@ def _normalize_columns(columns: Any) -> Tuple[List[str], List[Any]]:
         for name, value_type in columns.items():
             if not isinstance(name, str) or not name:
                 raise ValueError("column names must be non-empty strings")
-            if not _is_hex_type(value_type) and value_type not in _TYPE_NAMES:
-                raise ValueError("column types must be int, float, str or Hex")
+            if value_type not in _TYPE_NAMES:
+                raise ValueError("column types must be exactly int, float or str")
             types.append(value_type)
         if not names:
             raise ValueError("columns must not be empty")
@@ -445,7 +373,7 @@ class ViewWidget:
         _validate_fsync(fsync)
         if columns is None:
             schema_names: List[str] = []
-            schema_types: List[Any] = []
+            schema_types: List[Optional[type]] = []
         else:
             schema_names, schema_types = _normalize_columns(columns)
         self._colors: Dict[str, str] = _normalize_colors(colors)
@@ -472,11 +400,11 @@ class ViewWidget:
         self._ring_max: int = ring_depth
         self._ring: Deque[Tuple[Any, ...]] = deque(maxlen=ring_depth) if ring_depth > 0 else deque()
 
-        self._schema: List[Tuple[str, Any]] = list(
+        self._schema: List[Tuple[str, Optional[type]]] = list(
             zip(schema_names, schema_types)
         )
         self._schema_names: List[str] = schema_names
-        self._schema_types: List[Any] = schema_types
+        self._schema_types: List[Optional[type]] = schema_types
         self._pending_types: bool = any(value_type is None for value_type in schema_types)
         self._counts: Dict[str, Dict[str, int]] = {}
         self._rows_written: int = 0
@@ -510,15 +438,14 @@ class ViewWidget:
             return self._rows_written
 
     @property
-    def _column(self) -> Dict[str, Any]:
+    def _column(self) -> Dict[str, Optional[type]]:
         """FaultViz compatibility shim: column name -> frozen type.
 
         FaultViz exposes ``_column`` as a plain dict after the first row and
         some experiment scripts read it to detect schema changes. ViewViewView
         keeps the authoritative schema in ``_schema_names``/``_schema_types``;
         this read-only snapshot mirrors it (``None`` means a pre-declared
-        column whose type is still pending the first record; ``Hex`` marks a
-        hexadecimal column).
+        column whose type is still pending the first record).
         """
         with self._lock:
             return dict(zip(self._schema_names, self._schema_types))
@@ -553,7 +480,7 @@ class ViewWidget:
                 # (bool, numpy scalars, None, ...) before touching CSV/memory.
                 if not kwargs or any(type(value) not in _TYPE_NAMES for value in kwargs.values()):
                     self._logger.error(
-                        "record names/types mismatch; supported types: int, float, str, hex"
+                        "record names/types mismatch; supported types: int, float, str"
                     )
                     return False
                 self._schema_names = list(kwargs)
@@ -563,7 +490,7 @@ class ViewWidget:
             else:
                 if not self._row_matches_schema(kwargs):
                     self._logger.error(
-                        "record names/types mismatch; supported types: int, float, str, hex"
+                        "record names/types mismatch; supported types: int, float, str"
                     )
                     return False
                 if self._pending_types:
@@ -574,12 +501,9 @@ class ViewWidget:
                     self._schema = list(zip(self._schema_names, self._schema_types))
                     self._pending_types = False
 
-            values = [
-                _coerce_value(kwargs[name], expected)
-                for name, expected in self._schema
-            ]
-            self._write_record_locked(values)
+            self._write_record_locked(kwargs)
 
+            values = [kwargs[name] for name in self._schema_names]
             self._rows_written += 1
             self._record_in_memory_locked(values)
             self._syncer.wake()
@@ -693,7 +617,13 @@ class ViewWidget:
         for name, expected_type in self._schema:
             if name not in kwargs:
                 return False
-            if not _value_fits_type(kwargs[name], expected_type):
+            value = kwargs[name]
+            if expected_type is None:
+                # Sequence-declared columns: any exact int/float/str is fine
+                # for this first record; the types are adopted afterwards.
+                if type(value) not in _TYPE_NAMES:
+                    return False
+            elif type(value) is not expected_type:
                 return False
         return True
 
@@ -707,8 +637,9 @@ class ViewWidget:
             column_counts[key] = column_counts.get(key, 0) + 1
         self._ring.append(tuple(values))
 
-    def _write_record_locked(self, values: List[Any]) -> None:
-        """Append one coerced record to the CSV channel (authoritative, step 5)."""
+    def _write_record_locked(self, kwargs: Dict[str, Any]) -> None:
+        """Append one record to the CSV channel (authoritative, step 5)."""
+        values = [kwargs[name] for name in self._schema_names]
         try:
             if self._csv_file is None:
                 self._open_csv_locked()
@@ -827,7 +758,7 @@ class ViewWidget:
     def _build_payload_locked(self, state_key: Any, depth: int) -> Dict[str, Any]:
         """Snapshot payload per the frozen contract Section 4.3."""
         columns = [
-            {"name": name, "type": _type_name(value_type)}
+            {"name": name, "type": _TYPE_NAMES.get(value_type, "str")}
             for name, value_type in zip(self._schema_names, self._schema_types)
         ]
         state_value: Optional[str] = None

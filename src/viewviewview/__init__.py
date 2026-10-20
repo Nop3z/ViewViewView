@@ -16,7 +16,6 @@ __version__ = "0.1.0"
 __all__ = [
     "ViewWidget",
     "ViewViewView",
-    "Hex",
     "VvvPanel",
     "__version__",
     "csvplot",
@@ -51,7 +50,6 @@ _LAZY_EXPORTS = {
     "ViewWidget": ("viewviewview.core", "ViewWidget"),
     # Compatibility alias (contract Section 3.5).
     "ViewViewView": ("viewviewview.core", "ViewWidget"),
-    "Hex": ("viewviewview.core", "Hex"),
     "start_view_service": ("viewviewview.compat", "start_view_service"),
     "csvview": ("viewviewview.compat", "csvview"),
     "csvplot": ("viewviewview.compat", "csvplot"),
