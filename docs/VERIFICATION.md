@@ -23,7 +23,7 @@
 
 ## M3 测试套件（`python -m pytest -q`）
 
-**61 passed**，覆盖 `tests/test_core.py`、`tests/test_compat.py`、`tests/test_panel.py`、`tests/test_stress.py`。
+**70 passed**，覆盖 `tests/test_core.py`、`tests/test_compat.py`、`tests/test_panel.py`、`tests/test_stress.py`（含 `Hex` 列的规范化、定宽、非法值拒绝、payload 类型与 CSV 回读推断）。
 
 压测实测：
 

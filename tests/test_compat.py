@@ -24,6 +24,21 @@ def test_start_view_service_is_a_repeating_noop(caplog):
     assert "Deephaven service not required" in caplog.text
 
 
+def test_csvview_infers_hex_columns(monkeypatch, tmp_path):
+    path = tmp_path / "hex.csv"
+    path.write_bytes(
+        b"state,data\r\nPASS,0x1A2B\r\nFAIL,0xFF\r\n"
+    )
+    captured = {}
+    monkeypatch.setattr(
+        compat,
+        "render_payload",
+        lambda payload, **kwargs: captured.update(payload),
+    )
+    compat.csvview(str(path))
+    assert captured["columns"][1] == {"name": "data", "type": "hex"}
+
+
 def test_csvview_builds_counts_and_newest_first(monkeypatch, tmp_path):
     path = make_csv(
         tmp_path,

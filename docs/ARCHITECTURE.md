@@ -19,6 +19,7 @@
   - D9 CSV 默认文件名 = 控件创建（实验开始）时刻：`YYYYMMDD-HHMMSS.csv`，同名冲突追加 `-1`；仍支持 `csv_path=` 手动命名（自动创建父目录）。
   - D10 视觉：深色主题；字符串字段文字纯白 `#ffffff`；上窗计数与 `delay`/`pulse` 使用 FaultViz 的 positive-number 绿色，默认 `#19ff25`；`errcode` 等其他数值列保持白色。绿色列由 `number_columns=` 控制，颜色由 `colors=` 的 `count`/`number` 控制。
   - D13 配色可自定义：`ViewWidget(..., colors={...})` 接受 `text/count/number/muted/background/panel/header/row_alt/accent/border/live` 十一个 key 的十六进制颜色；仅覆盖传入项，前端以 CSS 变量方式应用（不拼接样式文本）。
+  - D14 Hex 列类型：`columns={"data": Hex}` 或 `Hex(width)` 声明十六进制列；接受非负 int 与 `0x...`/裸十六进制字符串，统一规范化为大写 `0x...`（可选零填充位宽），CSV 存规范化文本；不参与分类计数。自动 schema 模式不推断 Hex（保持 int/float/str 行为）。
   - D11 列宽可拖拽：拖动表头分隔线调整列宽；相邻两列分担增量，最后一列向右扩展表格（容器横向滚动）。宽度按表（统计表/明细表）保存在视图状态中，跨实时刷新保持；拖拽期间暂缓 payload 重绘，释放后立即补上最新快照。
   - D12 紧凑列布局：表格默认按内容宽度排列（`width: max-content`，不再拉伸到面板整宽），上窗 `state` 与 `count` 相邻、明细各列紧贴（对齐 FaultViz 观感）；拖动表头分隔线在此基础上微调列宽。
 - 参考工具链：核心依赖仅 `anywidget`；`pygwalker`/`pandas` 仅 plot 路径使用（extras）；打包 hatchling。
@@ -36,7 +37,7 @@
 
 ## 2. 数据模型（核心不变式）
 
-- 单实例 schema：首个合法 `update(**kwargs)` 的 kwargs 顺序即列集列序。仅接受**精确类型** `int` / `float` / `str`（`type(v) is T`；bool、numpy 标量一律不匹配）。此后每行都必须键集一致、类型逐一精确匹配；**键的传入顺序不敏感**（与 FaultViz 的 `_check_columns` 行为一致；CSV 始终按冻结的 schema 列序落盘）。
+- 单实例 schema：首个合法 `update(**kwargs)` 的 kwargs 顺序即列集列序。仅接受**精确类型** `int` / `float` / `str`（`type(v) is T`；bool、numpy 标量一律不匹配）；通过 `columns=` 可用 `Hex` 标记声明十六进制列（接受非负 int 或 `0x...` 字符串，规范化存储）。此后每行都必须键集一致、类型逐一精确匹配；**键的传入顺序不敏感**（与 FaultViz 的 `_check_columns` 行为一致；CSV 始终按冻结的 schema 列序落盘）。
 - 一行数据同时流入两条通道：
   1. **CSV 通道（权威）**：先于一切显示工作写入；失败则视同致命。
   2. **内存通道**：`counts`（仅 str 列的 `dict[str,int]` 计数，覆盖本实例写入的每一行；可无限增长，属预期）与 `ring`（最近 N 行的 deque 环形缓冲，N 由 live_rows/展示深度控制）。
@@ -49,7 +50,7 @@ No-op：校验后记录日志 `"Deephaven service not required; live rendering i
 
 ### 3.2 `ViewWidget(csv_path=None, display_limit=None, flush_every=1, live_rows=None, fsync=False, columns=None, colors=None, number_columns=None)`
 构造校验（语义/错误消息与 FaultViz 相同）：`display_limit`、`live_rows` 须为非负 int 或 None，否则 `ValueError("limit must be a non-negative integer or None")`；`flush_every` 须为正 int，否则 `ValueError("flush_every must be a positive integer")`；`fsync` 须为 bool，否则 `ValueError("fsync must be a bool")`。
-`columns`（向后兼容扩展）：`None` = 首行定 schema；`Mapping[str, int|float|str]` = 列名/列序/类型全部显式；序列 `[name, ...]` = 仅固定列名/列序，类型由首条合法记录推断。非法输入（空、重名、非字符串名、非 int/float/str 类型）抛 `ValueError`。
+`columns`（向后兼容扩展）：`None` = 首行定 schema；`Mapping[str, int|float|str|Hex]` = 列名/列序/类型全部显式（`Hex` 可写成类或 `Hex(width)` 实例）；序列 `[name, ...]` = 仅固定列名/列序，类型由首条合法记录推断。非法输入（空、重名、非字符串名、非法类型）抛 `ValueError`。
 `colors`（向后兼容扩展，D13）：`Mapping[str, str]`，key ∈ `text/count/number/muted/background/panel/header/row_alt/accent/border/live`，value 为 `#rgb`/`#rrggbb`；未知 key 或非法色值抛 `ValueError`。仅覆盖传入项，其余用默认配色。`count` 控制上窗计数，`number` 控制 `number_columns` 指定列的颜色，两者默认都是 `#19ff25`。
 `number_columns`（向后兼容扩展，D10）：`Sequence[str]`，默认 `("delay", "pulse")`；只有这些列使用 `number` 颜色，其余数值列（如 `errcode`）保持白色。传空序列表示不高亮任何明细列。
 属性：`csv_path -> str`（绝对路径；默认在实例化时按起始时间生成 `YYYYMMDD-HHMMSS.csv`，文件在首条合法记录时才创建），`rows_written -> int`，`_column -> Dict[str, Optional[type]]`（FaultViz 兼容只读快照：列名 → 冻结类型；预声明但尚未定型的列为 `None`）。
@@ -110,7 +111,7 @@ flush 语义：每 `flush_every` 条 pending 后自动 `flush()`；`flush()` 刷
 ### 4.3 载荷契约（跨 A/B 的冻结接口）
 ```json
 {
-  "columns":  [{"name": "delay", "type": "int"}],   // 仅用户列；type ∈ int|float|str
+  "columns":  [{"name": "delay", "type": "int"}],   // 仅用户列；type ∈ int|float|str|hex
   "state_key": "state",                             // null = 无分类列，上窗空态
   "counts":   {"PASS": 123},                        // 本实例全量计数，key 为 str
   "rows":     [[1234, 50, "ok", 0]],                // 最新在前；深度 = min(有效limit或live_rows或200, 2000)

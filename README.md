@@ -92,7 +92,7 @@ for _ in range(500):
 print(vt.csv_path)   # 默认文件名为控件创建时刻，如 .../20261019-213005.csv
 ```
 
-`update()` 的关键字就是明细窗的列。想记录什么就传什么——只要值是精确的 `int` / `float` / `str`：
+`update()` 的关键字就是明细窗的列。想记录什么就传什么——常规类型要求精确的 `int` / `float` / `str`；十六进制列先用 `Hex` 声明（见下文）。
 
 ```python
 vt.update(state="PASS", delay=1200, pulse=30, reply="ok", errcode=0,
@@ -102,7 +102,7 @@ vt.update(state="PASS", delay=1200, pulse=30, reply="ok", errcode=0,
 字段也可以在实例化时一次性声明（推荐，类型在启动时即受控）：
 
 ```python
-# 映射形式：列名 -> 类型（int / float / str），顺序即列序
+# 映射形式：列名 -> 类型（int / float / str / Hex），顺序即列序
 vt = faultviz.ViewWidget(columns={"state": str, "delay": int, "errcode": int})
 
 # 序列形式：只声明列名，类型由第一条记录推断
@@ -119,7 +119,7 @@ vt = faultviz.ViewWidget(columns=["state", "delay", "pulse", "reply", "errcode"]
 vt = faultviz.ViewWidget(
     colors={
         "count": "#19ff25",     # 上窗计数值（默认 #19ff25）
-        "number": "#19ff25",    # 明细数值列（delay/pulse/errcode 等，默认 #19ff25）
+        "number": "#19ff25",    # number_columns 指定的列（默认 delay/pulse）
         "text": "#ffffff",      # 字段文字（state/reply 等字符串列）
         "muted": "#8b95a1",     # 页脚、空态提示
         "background": "#1c2126",
@@ -136,6 +136,38 @@ vt = faultviz.ViewWidget(
 - 颜色值支持 `#rgb` / `#rrggbb`
 - 未知 key、非十六进制值会抛 `ValueError`
 - 所有颜色在 widget 创建时一次性传入；默认计数色为 `#19ff25`
+
+### 十六进制列（Hex，可选扩展）
+
+如果某个字段是 `0x...` 形式的寄存器值/响应字，直接用 `str` 会失去校验和规范化；可以把列声明为 `Hex`：
+
+```python
+from viewviewview import Hex
+
+vt = faultviz.ViewWidget(
+    columns={
+        "state": str,
+        "delay": int,
+        "pulse": int,
+        "reply": str,
+        "data": Hex,        # 不补零
+        # "data": Hex(8),   # 固定 8 位，自动补零
+    }
+)
+
+vt.update(state="PASS", delay=1200, pulse=30, reply="ok", data=0x1A2B)
+vt.update(state="FAIL", delay=1300, pulse=35, reply="short", data="0x1a2b")
+# 两行在 CSV / 表格中都是 "0x1A2B"
+```
+
+规则：
+
+- 接受非负 `int`（包括 `0x1A2B` 这种字面量）或 `0x...` / `1A2B` 字符串
+- 统一存成大写 `0x...`；`Hex(8)` 会补零到 8 位
+- 负数、非法字符、超出位宽的值会被拒绝（`update()` 返回 `False`）
+- `Hex` 列不参与上窗分类计数
+- 仅支持在 `columns=` 映射里声明（自动 schema 无法区分 int 与 hex）
+- 若只想原样记录十六进制文本、不做校验，直接传 `hex(v)` 字符串即可（按 `str` 列处理）
 
 ### 哪些数值列显示绿色
 
@@ -177,7 +209,7 @@ faultviz.csvplot(path)                                             # pygwalker �
 | --- | --- | --- |
 | `start_view_service(port=12345, max_heap="2g")` | ✅ 同签名 | no-op，无需 JVM；参数被接受且不会抛异常 |
 | `ViewWidget(csv_path=None, display_limit=None, flush_every=1, live_rows=None, fsync=False)` | ✅ 同签名 + 可选 `columns=` / `colors=` / `number_columns=` | 语义一致，含合法性校验错误文案；扩展参数均向后兼容 |
-| `widget.update(**kwargs) -> bool` | ✅ | 首行定 schema；类型/键不匹配返回 `False`；CSV 写失败抛异常并锁死实例 |
+| `widget.update(**kwargs) -> bool` | ✅ | 首行定 schema；类型/键不匹配返回 `False`；扩展支持 `Hex` 十六进制列；CSV 写失败抛异常并锁死实例 |
 | `widget.show(state="state", limit=None, full=False)` | ✅ | 上窗分类计数 + 下窗明细；`limit=0` 仅显示统计 |
 | `widget.plot(state="state", limit=None, full=False)` | ✅ | pygwalker 可用则交互绘图，否则降级 CSV 查看 |
 | `widget.flush()` / `close()` / `csv_path` / `rows_written` | ✅ | `close()` 幂等，支持上下文管理器 |

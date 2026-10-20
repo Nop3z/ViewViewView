@@ -15,3 +15,4 @@
 - [x] R9 RESOLVED（所有者需求，2026-10-19）：取消荧光绿计数。经源码求证，FaultViz 的 count 是 Deephaven positive-number 绿；深色主题为 `#ace97e`，浅色为 `#008f5d`。所有者最终指定 **`#19ff25`** 作为默认计数色，并新增 `colors=` 自定义接口（契约 D13/§3.2/§4.4 已更新）。
 - [x] R11 RESOLVED（所有者需求，2026-10-19）：明细表数值列默认高亮色 `#19ff25`；但**仅 `delay`/`pulse` 使用绿色，`errcode` 等其他数值列保持白色**。新增 `number_columns=` 控制高亮列（默认 `delay`/`pulse`），字符串列始终白色。契约 D10/D13/§3.2/§4.4 已更新。
 - [x] R12 RESOLVED（所有者需求，2026-10-20）：FaultViz 脚本兼容性——实验脚本会读取 `vt._column`（列名→类型）来检测 schema 变化；ViewViewView 新增只读属性 `_column` 作为兼容快照，预声明但类型未定的列为 `None`。契约 §3.2 已更新。
+- [x] R13 RESOLVED（所有者需求，2026-10-20）：新增 `Hex` 列类型——`columns={"data": Hex}` / `Hex(width)`，接受非负 int 与 hex 字符串，规范化存为 `0x...`（可补零），CSV 保持十六进制文本，不参与计数；自动 schema 模式仍按 int/float/str 处理。契约 D14/§2/§3.2/§4.3 已更新。

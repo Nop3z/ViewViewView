@@ -11,6 +11,7 @@ from __future__ import annotations
 import csv
 import io
 import logging
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from .core import (
@@ -48,14 +49,21 @@ def _read_csv_window(
     return _TailReader(path, _LOGGER).read(limit)
 
 
+_HEX_TEXT = re.compile(r"^0[xX][0-9a-fA-F]+$")
+
+
 def _infer_column_type(values: List[str]) -> str:
-    """Best-effort column type for alignment; displayed text stays untouched."""
+    """Best-effort type for CSV columns (alignment only, text is preserved)."""
     has_value = False
     all_int = True
+    all_float = True
+    all_hex = True
     for value in values:
         if value == "":
             continue
         has_value = True
+        if not _HEX_TEXT.match(value):
+            all_hex = False
         try:
             int(value)
         except ValueError:
@@ -63,10 +71,16 @@ def _infer_column_type(values: List[str]) -> str:
             try:
                 float(value)
             except ValueError:
-                return "str"
+                all_float = False
     if not has_value:
         return "str"
-    return "int" if all_int else "float"
+    if all_int:
+        return "int"
+    if all_hex:
+        return "hex"
+    if all_float:
+        return "float"
+    return "str"
 
 
 def _build_payload(

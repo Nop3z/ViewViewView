@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from viewviewview import ViewWidget
-from viewviewview.core import _TailReader
+from viewviewview.core import Hex, _TailReader
 
 
 def read_all(path):
@@ -39,7 +39,7 @@ def test_first_update_rejects_empty_and_invalid_types(tmp_path, caplog):
     assert widget.update(state="PASS", delay=None) is False
     assert widget.update(state="PASS", delay=object()) is False
     assert widget.rows_written == 0
-    assert "record names/types mismatch; supported types: int, float, str" in caplog.text
+    assert "record names/types mismatch; supported types: int, float, str, hex" in caplog.text
     assert not (tmp_path / "a.csv").exists()  # never created
     widget.close()
 
@@ -290,6 +290,66 @@ def test_faultviz_compat_column_attribute_predeclared(tmp_path):
     sequence.update(state="PASS", delay=1)
     assert sequence._column == {"state": str, "delay": int}
     sequence.close()
+
+
+def test_hex_column_canonicalizes_values(tmp_path):
+    widget = ViewWidget(
+        csv_path=str(tmp_path / "a.csv"),
+        columns={"state": str, "data": Hex},
+    )
+    assert widget.update(state="PASS", data=0x1A2B) is True
+    assert widget.update(state="FAIL", data="0x1a2b") is True
+    assert widget.update(state="PASS", data="0XFF") is True
+    assert widget.update(state="PASS", data="not-hex") is False
+    assert widget.update(state="PASS", data=-1) is False
+    assert widget.update(state="PASS", data=1.5) is False
+    assert widget.update(state="PASS", data=True) is False
+    widget.close()
+    assert read_all(tmp_path / "a.csv") == [
+        ["state", "data"],
+        ["PASS", "0x1A2B"],
+        ["FAIL", "0x1A2B"],
+        ["PASS", "0xFF"],
+    ]
+
+
+def test_hex_column_width(tmp_path):
+    widget = ViewWidget(
+        csv_path=str(tmp_path / "a.csv"), columns={"data": Hex(8)}
+    )
+    assert widget.update(data=0x1A2B) is True
+    assert widget.update(data="0x1") is True
+    assert widget.update(data=0x1_0000_0000) is False  # exceeds 32 bits
+    widget.close()
+    assert read_all(tmp_path / "a.csv") == [
+        ["data"],
+        ["0x00001A2B"],
+        ["0x00000001"],
+    ]
+
+
+def test_hex_payload_type_and_export(tmp_path, monkeypatch):
+    import viewviewview as package
+    import viewviewview.core as core
+
+    assert package.Hex is Hex
+    captured = {}
+    monkeypatch.setattr(
+        core,
+        "render_payload",
+        lambda payload, colors=None, number_columns=None, on_created=None: captured.update(
+            {"payload": payload}
+        ),
+    )
+    widget = ViewWidget(
+        csv_path=str(tmp_path / "a.csv"),
+        columns={"data": Hex},
+        number_columns=["data"],
+    )
+    widget.update(data=0xFF)
+    widget.show()
+    assert captured["payload"]["columns"] == [{"name": "data", "type": "hex"}]
+    widget.close()
 
 
 def test_number_columns_validation(tmp_path):
