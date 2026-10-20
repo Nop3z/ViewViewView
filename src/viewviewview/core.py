@@ -438,6 +438,19 @@ class ViewWidget:
             return self._rows_written
 
     @property
+    def _column(self) -> Dict[str, Optional[type]]:
+        """FaultViz compatibility shim: column name -> frozen type.
+
+        FaultViz exposes ``_column`` as a plain dict after the first row and
+        some experiment scripts read it to detect schema changes. ViewViewView
+        keeps the authoritative schema in ``_schema_names``/``_schema_types``;
+        this read-only snapshot mirrors it (``None`` means a pre-declared
+        column whose type is still pending the first record).
+        """
+        with self._lock:
+            return dict(zip(self._schema_names, self._schema_types))
+
+    @property
     def display_limit(self) -> Optional[int]:
         """Configured live detail row limit (diagnostics)."""
         return self._display_limit

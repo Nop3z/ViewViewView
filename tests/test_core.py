@@ -268,6 +268,30 @@ def test_colors_override_validation(tmp_path):
             ViewWidget(colors=bad)
 
 
+def test_faultviz_compat_column_attribute(tmp_path):
+    widget = ViewWidget(csv_path=str(tmp_path / "a.csv"))
+    assert widget._column == {}
+    widget.update(state="PASS", delay=1, pulse=2.5)
+    assert widget._column == {"state": str, "delay": int, "pulse": float}
+    widget.close()
+
+
+def test_faultviz_compat_column_attribute_predeclared(tmp_path):
+    mapping = ViewWidget(
+        csv_path=str(tmp_path / "a.csv"),
+        columns={"state": str, "delay": int},
+    )
+    assert mapping._column == {"state": str, "delay": int}
+    mapping.close()
+    sequence = ViewWidget(
+        csv_path=str(tmp_path / "b.csv"), columns=["state", "delay"]
+    )
+    assert dict(sequence._column) == {"state": None, "delay": None}
+    sequence.update(state="PASS", delay=1)
+    assert sequence._column == {"state": str, "delay": int}
+    sequence.close()
+
+
 def test_number_columns_validation(tmp_path):
     widget = ViewWidget(
         csv_path=str(tmp_path / "a.csv"), number_columns=["delay", "temperature"]

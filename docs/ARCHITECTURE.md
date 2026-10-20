@@ -52,7 +52,7 @@ No-op：校验后记录日志 `"Deephaven service not required; live rendering i
 `columns`（向后兼容扩展）：`None` = 首行定 schema；`Mapping[str, int|float|str]` = 列名/列序/类型全部显式；序列 `[name, ...]` = 仅固定列名/列序，类型由首条合法记录推断。非法输入（空、重名、非字符串名、非 int/float/str 类型）抛 `ValueError`。
 `colors`（向后兼容扩展，D13）：`Mapping[str, str]`，key ∈ `text/count/number/muted/background/panel/header/row_alt/accent/border/live`，value 为 `#rgb`/`#rrggbb`；未知 key 或非法色值抛 `ValueError`。仅覆盖传入项，其余用默认配色。`count` 控制上窗计数，`number` 控制 `number_columns` 指定列的颜色，两者默认都是 `#19ff25`。
 `number_columns`（向后兼容扩展，D10）：`Sequence[str]`，默认 `("delay", "pulse")`；只有这些列使用 `number` 颜色，其余数值列（如 `errcode`）保持白色。传空序列表示不高亮任何明细列。
-属性：`csv_path -> str`（绝对路径；默认在实例化时按起始时间生成 `YYYYMMDD-HHMMSS.csv`，文件在首条合法记录时才创建），`rows_written -> int`。
+属性：`csv_path -> str`（绝对路径；默认在实例化时按起始时间生成 `YYYYMMDD-HHMMSS.csv`，文件在首条合法记录时才创建），`rows_written -> int`，`_column -> Dict[str, Optional[type]]`（FaultViz 兼容只读快照：列名 → 冻结类型；预声明但尚未定型的列为 `None`）。
 上下文管理器协议 + `close()` 幂等可重入。
 
 #### `update(**kwargs) -> bool`

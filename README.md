@@ -181,6 +181,7 @@ faultviz.csvplot(path)                                             # pygwalker �
 | `widget.show(state="state", limit=None, full=False)` | ✅ | 上窗分类计数 + 下窗明细；`limit=0` 仅显示统计 |
 | `widget.plot(state="state", limit=None, full=False)` | ✅ | pygwalker 可用则交互绘图，否则降级 CSV 查看 |
 | `widget.flush()` / `close()` / `csv_path` / `rows_written` | ✅ | `close()` 幂等，支持上下文管理器 |
+| `widget._column`（FaultViz 内部字段） | ✅ 只读兼容 | 列名 → 类型快照；可用于检测 schema 变化，预声明未定型的列为 `None` |
 | `csvview(csv, state="state", limit=None, full=False)` | ✅ | 无需先启动服务 |
 | `csvplot(name, limit=None, full=False)` | ✅ | 同上 |
 | CSV 文件格式 | ✅ 兼容 | UTF-8、`csv` 标准方言、首行列名，可被 FaultViz 读取 |
