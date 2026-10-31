@@ -34,6 +34,16 @@ _DEFAULT_DETAIL_ROWS = 200   # default payload detail depth (contract 4.3)
 _MAX_WINDOW_ROWS = 2000      # payload rows hard cap
 _FRAME_DELAY = 0.05          # Syncer frame-merge delay in seconds (4.1)
 
+
+def _validate_frame_delay(value: Any) -> float:
+    """Validate a Syncer frame delay in seconds (positive, finite)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("frame_delay must be a positive number of seconds")
+    delay = float(value)
+    if delay <= 0.0 or delay != delay or delay == float("inf"):
+        raise ValueError("frame_delay must be a positive number of seconds")
+    return delay
+
 _TYPE_NAMES: Dict[type, str] = {int: "int", float: "float", str: "str"}
 
 _DEFAULT_CSV_FORMAT = "%Y%m%d-%H%M%S"  # start-time based default file name
@@ -267,14 +277,24 @@ class Syncer:
     internal errors the failure is logged at DEBUG level only.
     """
 
-    def __init__(self, snapshot_provider: Any, logger: Optional[logging.Logger] = None) -> None:
+    def __init__(
+        self,
+        snapshot_provider: Any,
+        logger: Optional[logging.Logger] = None,
+        frame_delay: Optional[float] = None,
+    ) -> None:
         """Create a syncer.
 
         ``snapshot_provider()`` must return a fresh payload dict; it is only
         called when at least one panel is attached (zero overhead otherwise).
+        ``frame_delay`` is the frame-merge delay in seconds (default 0.05,
+        i.e. one push every 50 ms at most).
         """
         self._snapshot_provider = snapshot_provider
         self._logger = logger or _LOGGER
+        self._frame_delay = _validate_frame_delay(
+            frame_delay if frame_delay is not None else _FRAME_DELAY
+        )
         self._panels_lock = threading.Lock()
         self._panels: List[Any] = []
         self._timer: Optional[threading.Timer] = None
@@ -323,7 +343,7 @@ class Syncer:
                     return
                 if self._timer is not None:
                     return
-                timer = threading.Timer(_FRAME_DELAY, self._refresh)
+                timer = threading.Timer(self._frame_delay, self._refresh)
                 timer.daemon = True
                 self._timer = timer
             timer.start()
@@ -366,6 +386,7 @@ class ViewWidget:
         columns: Optional[Any] = None,
         colors: Optional[Mapping[str, str]] = None,
         number_columns: Optional[Sequence[str]] = None,
+        frame_delay: Optional[float] = None,
     ) -> None:
         _validate_limit(display_limit)
         _validate_limit(live_rows)
@@ -419,8 +440,11 @@ class ViewWidget:
         # Panel push state (last show() selection wins for later frames).
         self._selected_state: str = "state"
         self._selected_depth: Optional[int] = None
+        self._shown_panel: Any = None
 
-        self._syncer = Syncer(self._build_live_snapshot, _LOGGER)
+        self._syncer = Syncer(
+            self._build_live_snapshot, _LOGGER, frame_delay=frame_delay
+        )
 
     # ------------------------------------------------------------------
     # Public properties
@@ -531,11 +555,16 @@ class ViewWidget:
             self._syncer.detach_all()
             handle, self._csv_file, self._csv_writer = self._csv_file, None, None
             self._closed = True
+            panel = self._shown_panel
+            self._shown_panel = None
         if handle is not None:
             try:
                 handle.close()
             except Exception:  # noqa: BLE001 - close silently
                 self._logger.debug("Closing CSV handle failed", exc_info=True)
+        if panel is not None:
+            with contextlib.suppress(Exception):
+                panel.close()
 
     def __enter__(self) -> "ViewWidget":
         return self
@@ -546,8 +575,20 @@ class ViewWidget:
     # ------------------------------------------------------------------
     # Display
     # ------------------------------------------------------------------
-    def show(self, state: str = "state", limit: Optional[int] = None, full: bool = False) -> None:
-        """Display the live payload in a new panel (contract 3.2)."""
+    def show(
+        self,
+        state: str = "state",
+        limit: Optional[int] = None,
+        full: bool = False,
+        replace: bool = False,
+    ) -> None:
+        """Display the live payload in a new panel (contract 3.2).
+
+        ``replace=True`` closes the panel shown by the previous ``show()``
+        call of this widget (if any) before displaying the new one, keeping
+        at most one live panel per widget. The default ``False`` keeps the
+        documented FaultViz-compatible behaviour of accumulating panels.
+        """
         _validate_limit(limit)
         with self._lock:
             if self._rows_written == 0 and not self._schema_names:
@@ -558,12 +599,23 @@ class ViewWidget:
             self._selected_state = state
             self._selected_depth = self._resolve_depth(limit, full)
             payload = self._build_payload_locked(state, self._selected_depth)
+            previous = self._shown_panel if replace else None
+            self._shown_panel = None
+        if previous is not None:
+            with contextlib.suppress(Exception):
+                previous.close()
+            self._syncer.detach(previous)
         render_payload(
             payload,
             colors=self._colors,
             number_columns=self._number_columns,
-            on_created=self._syncer.attach,
+            on_created=self._adopt_panel,
         )
+
+    def _adopt_panel(self, panel: Any) -> None:
+        """Remember the panel created by ``show`` and attach it to the syncer."""
+        self._shown_panel = panel
+        self._syncer.attach(panel)
 
     def plot(self, state: str = "state", limit: Optional[int] = None, full: bool = False) -> None:
         """Visualise the current window via pygwalker or the CSV fallback (3.2)."""

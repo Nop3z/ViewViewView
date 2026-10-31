@@ -406,6 +406,67 @@ def test_show_outside_ipython_warns(tmp_path, caplog):
     widget.close()
 
 
+def test_show_replace_closes_previous_panel(tmp_path, monkeypatch):
+    """S2b: show(replace=True) closes the previous panel; default accumulates."""
+    import viewviewview.core as core
+
+    created = []
+
+    class FakePanel:
+        def __init__(self):
+            self.closed = False
+            created.append(self)
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(
+        core,
+        "render_payload",
+        lambda payload, colors=None, number_columns=None, on_created=None: on_created(
+            FakePanel()
+        ),
+    )
+    widget = ViewWidget(csv_path=str(tmp_path / "a.csv"))
+    widget.update(state="PASS", delay=1)
+
+    widget.show()  # default: keep old panels
+    widget.show()
+    assert len(created) == 2
+    assert created[0].closed is False
+    assert widget.syncer.panel_count() == 2
+
+    widget.show(replace=True)  # closes the previous panel, shows a new one
+    assert len(created) == 3
+    assert created[1].closed is True
+    assert created[2].closed is False
+    assert widget.syncer.panel_count() == 2  # detached panel was removed
+
+    widget.close()  # widget teardown closes the live panel too
+    assert created[2].closed is True
+    assert widget.syncer.panel_count() == 0
+
+
+def test_frame_delay_parameter():
+    """S3: frame_delay is validated and defaults to 0.05 s."""
+    import viewviewview.core as core
+
+    widget = ViewWidget()
+    assert widget.syncer._frame_delay == 0.05
+    widget.close()
+
+    widget = ViewWidget(frame_delay=0.1)
+    assert widget.syncer._frame_delay == 0.1
+    widget.close()
+
+    for bad in (0, -0.5, "x", True, float("nan")):
+        with pytest.raises(ValueError):
+            ViewWidget(frame_delay=bad)
+
+    with pytest.raises(ValueError):
+        core.Syncer(lambda: None, frame_delay=-1)
+
+
 def test_syncer_pushes_to_panels(tmp_path):
     class Panel:
         payload = None

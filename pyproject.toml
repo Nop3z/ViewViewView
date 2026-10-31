@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "viewviewview"
-version = "0.1.0"
+version = "0.2.0"
 description = "Lightweight, freeze-proof fault-injection results viewer with a FaultViz-compatible API"
 readme = "README.md"
 license = "MulanPSL-2.0"

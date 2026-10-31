@@ -77,6 +77,9 @@ vt = faultviz.ViewWidget(
     columns={"state": str, "delay": int, "pulse": int, "reply": str, "errcode": int},
 )
 vt.show()       # 立即显示自定义字段的空表；注入开始后自动实时刷新
+# 长时间实验建议改用 vt.show(replace=True)：重跑 cell / 多次 show 时
+# 自动关闭上一个面板，避免浏览器端面板累积占内存；close() 会一并回收。
+# ViewWidget(frame_delay=0.1) 可放宽前端推送合帧间隔（默认 0.05 s）。
 
 def attack():
     delay = random.randint(100, 2000)
@@ -178,7 +181,7 @@ faultviz.csvplot(path)                                             # pygwalker �
 | `start_view_service(port=12345, max_heap="2g")` | ✅ 同签名 | no-op，无需 JVM；参数被接受且不会抛异常 |
 | `ViewWidget(csv_path=None, display_limit=None, flush_every=1, live_rows=None, fsync=False)` | ✅ 同签名 + 可选 `columns=` / `colors=` / `number_columns=` | 语义一致，含合法性校验错误文案；扩展参数均向后兼容 |
 | `widget.update(**kwargs) -> bool` | ✅ | 首行定 schema；类型/键不匹配返回 `False`；CSV 写失败抛异常并锁死实例 |
-| `widget.show(state="state", limit=None, full=False)` | ✅ | 上窗分类计数 + 下窗明细；`limit=0` 仅显示统计 |
+| `widget.show(state="state", limit=None, full=False)` | ✅ | 上窗分类计数 + 下窗明细；`limit=0` 仅显示统计；扩展参数 `replace=True` 显示新面板前关闭本 widget 的上一个面板（省内存，默认 `False` 保持 FaultViz 行为） |
 | `widget.plot(state="state", limit=None, full=False)` | ✅ | pygwalker 可用则交互绘图，否则降级 CSV 查看 |
 | `widget.flush()` / `close()` / `csv_path` / `rows_written` | ✅ | `close()` 幂等，支持上下文管理器 |
 | `widget._column`（FaultViz 内部字段） | ✅ 只读兼容 | 列名 → 类型快照；可用于检测 schema 变化，预声明未定型的列为 `None` |

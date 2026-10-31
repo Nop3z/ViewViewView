@@ -91,10 +91,16 @@
 | 指标 | 改动前 | 改动后 | 判定 |
 | --- | --- | --- | --- |
 | shadow 节点数（全程） | 每帧重建 6048 个 | **恒定 6048（drift 0）** | PASS |
-| 每帧渲染耗时（mean） | 15.9 ms | **9.0 ms** | PASS（预算 13 ms） |
+| 每帧渲染耗时（mean） | 15.9 ms | **9.5 ms** | PASS（预算 13 ms） |
 | 强制 GC 后堆漂移 | 持续爬升锯齿 | **-0.3 MB（回落基线）** | PASS（预算 5 MB） |
 
-新增回归：`tests/test_stress.py::test_push_loop_memory_bounded`（持续 update+推送 2 s，Python traced < 5 MB、线程无累积）；套件 67 项全绿，ruff 通过。`dev/preview.html`、`dev/demo.html` 由脚本重新生成并保持视觉一致。
+新增回归：`tests/test_stress.py::test_push_loop_memory_bounded`（持续 update+推送 2 s，Python traced < 5 MB、线程无累积）；套件全绿，ruff 通过。`dev/preview.html`、`dev/demo.html` 由脚本重新生成并保持视觉一致。
+
+**S2/S3（同批落地，默认行为不变）**：
+
+- `show(replace=True)`：显示新面板前关闭并脱离本 widget 的上一个面板，`close()` 亦回收当前面板——根治“多次 show()/重跑 cell 面板累积”；默认 `False` 保持 FaultViz 兼容行为。
+- `ViewWidget(frame_delay=...)` / `Syncer(frame_delay=...)`：推送合帧间隔参数化（默认 0.05 s 不变，非法值抛 `ValueError`），供后续按场景调优。
+- 版本号升至 **0.2.0**（`pyproject.toml` + `__init__.__version__`），保证 `pip install -U` 能真正拿到本批修复。
 7. Python 3.9 环境下 pip 会自动选择兼容的 anywidget 0.9.x（0.11+ 要求 Python ≥3.10）；本地实测环境为 Python 3.12 + anywidget 0.11，Python 3.9–3.12 的兼容性由 CI 矩阵持续验证。
 
 ## 后续建议
