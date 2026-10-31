@@ -27,3 +27,5 @@ env/
 # tests/ if the test engineer ever needs one) keeps the repo clean.
 *.csv
 !tests/**/*.csv
+
+dev/mem_harness.html

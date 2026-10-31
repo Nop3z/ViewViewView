@@ -306,10 +306,13 @@ function render({ model, el }) {
     dragging: false,
     pending: false,
   };
+  /** @type {{ key: string, countsBody: HTMLElement | null, detailBody: HTMLElement | null, footerLabel: HTMLElement | null } | null} */
+  let mounted = null;
   const readNumberColumns = (value) =>
     new Set(Array.isArray(value) ? value : ["delay", "pulse"]);
   const ctx = {
     layout,
+    mounted,
     numberColumns: readNumberColumns(model.get("number_columns")),
     redraw: () => draw(model.get("payload")),
   };
@@ -338,6 +341,7 @@ function render({ model, el }) {
   model.on("change:number_columns", onNumberColumnsChange);
 
   return () => {
+    ctx.mounted = null; // drop DOM references so the removed view can be GC'd
     if (typeof model.off === "function") {
       model.off("change:payload", onPayloadChange);
       model.off("change:theme", onThemeChange);
@@ -356,27 +360,150 @@ function render({ model, el }) {
  * @returns {void}
  */
 function renderPayload(root, payload, ctx) {
-  clearChildren(root);
   const columns = readColumns(payload);
   const counts = readCounts(payload);
   const rows = readRows(payload);
   const hasCounts = Object.keys(counts).length > 0;
+  const schemaKey = layoutKey(columns, readStateKey(payload), ctx.numberColumns);
+  const stateKey = readStateKey(payload);
+
+  // Fast path: same schema/state/number-columns as the currently mounted
+  // panes -> update the mounted tables in place instead of rebuilding ~6000
+  // nodes per frame. The DOM contract is unchanged: cell classes and text
+  // content end up exactly what a full rebuild would produce.
+  const mounted = ctx.mounted;
+  const canPatch =
+    mounted !== null &&
+    mounted.key === schemaKey &&
+    root.contains(mounted.countsBody) &&
+    root.contains(mounted.detailBody) &&
+    root.contains(mounted.footerLabel);
+  if (canPatch) {
+    patchCountsTable(mounted.countsBody, stateKey, counts);
+    if (mounted.detailBody !== null) {
+      patchDetailRows(mounted.detailBody, columns, rows, ctx);
+    }
+    patchFooter(mounted.footerLabel, payload, rows);
+    return;
+  }
+
+  clearChildren(root);
   if (columns.length === 0 && rows.length === 0 && !hasCounts) {
+    ctx.mounted = null;
     root.appendChild(buildNote("No data recorded."));
     return;
   }
 
-  const stateKey = readStateKey(payload);
-  root.appendChild(buildCountsPane(stateKey, counts, ctx));
+  const countsPane = buildCountsPane(stateKey, counts, ctx);
+  root.appendChild(countsPane);
 
   // §3.2 limit=0 → counts-only payload (no detail pane); rows arrive
   // newest-first already (§4.3), so render them in array order as-is.
   // Declared columns render even before the first record (empty tbody).
+  let detailBody = null;
   if (columns.length > 0) {
-    root.appendChild(buildDetailPane(columns, rows, ctx));
+    const detailPane = buildDetailPane(columns, rows, ctx);
+    root.appendChild(detailPane);
+    detailBody = detailPane.querySelector("tbody");
   }
 
-  root.appendChild(buildFooter(payload, rows));
+  const footer = buildFooter(payload, rows);
+  root.appendChild(footer);
+
+  ctx.mounted = {
+    key: schemaKey,
+    countsBody: countsPane.querySelector("tbody"),
+    detailBody,
+    footerLabel: footer.firstChild,
+  };
+}
+
+/**
+ * Stable identity for the mounted pane skeleton: column names+types, the
+ * state column and the number-highlight set. Any change forces one full
+ * rebuild (the old path), after which in-place updates resume.
+ * @returns {string}
+ */
+function layoutKey(columns, stateKey, numberColumns) {
+  const cols = columns
+    .map((column) => `${column.name}:${column.type ?? "?"}`)
+    .join("|");
+  const numbers = Array.from(numberColumns).join(",");
+  return `${stateKey ?? ""};${cols};${numbers}`;
+}
+
+/**
+ * Rebuild only the counts tbody (usually a handful of rows) in place.
+ * Column widths live on the table skeleton, which is untouched here.
+ * @returns {void}
+ */
+function patchCountsTable(tbody, stateKey, counts) {
+  if (tbody === null) {
+    return;
+  }
+  clearChildren(tbody);
+  for (const [bucket, count] of Object.entries(counts)) {
+    const tr = document.createElement("tr");
+    const nameCell = document.createElement("td");
+    nameCell.className = "vvv-td";
+    const countCell = document.createElement("td");
+    countCell.className = "vvv-td vvv-td--num vvv-count";
+    nameCell.textContent = toDisplayText(bucket);
+    countCell.textContent = toDisplayText(count);
+    tr.appendChild(nameCell);
+    tr.appendChild(countCell);
+    tbody.appendChild(tr);
+  }
+}
+
+/**
+ * Align the detail tbody to ``rows`` with the minimum number of DOM writes:
+ * reuse existing <tr> when the row count matches, add/remove only the tail
+ * difference, and set cell text only when it actually changed.
+ * @returns {void}
+ */
+function patchDetailRows(tbody, columns, rows, ctx) {
+  // Trim or extend the row count first.
+  while (tbody.children.length > rows.length) {
+    tbody.removeChild(tbody.lastChild);
+  }
+  const template = columns.map((column) =>
+    isNumericType(column.type) ? "vvv-td vvv-td--num" : "vvv-td",
+  );
+  while (tbody.children.length < rows.length) {
+    const tr = document.createElement("tr");
+    columns.forEach((column, index) => {
+      const td = document.createElement("td");
+      td.className =
+        template[index] + (ctx.numberColumns.has(column.name) ? " vvv-num" : "");
+      td.textContent = "";
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  }
+
+  rows.forEach((row, rowIndex) => {
+    const values = Array.isArray(row) ? row : [];
+    const tr = tbody.children[rowIndex];
+    columns.forEach((column, index) => {
+      const td = tr.children[index];
+      const text = toDisplayText(values[index]);
+      if (td.textContent !== text) {
+        td.textContent = text;
+      }
+    });
+  });
+}
+
+/** Update the footer caption text in place (nodes are reused). @returns {void} */
+function patchFooter(label, payload, rows) {
+  const safe = isPayloadObject(payload) ? payload : {};
+  const total = toCount(safe.total, "0");
+  const windowSize = toCount(safe.window, String(rows.length));
+  const text = `已记录 ${total} 行 / 当前窗口 ${windowSize} 行`;
+  if (label.textContent !== text) {
+    label.textContent = text;
+  }
 }
 
 /** @returns {{ name: string, type: string }[]} User columns of the payload. */

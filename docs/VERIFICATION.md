@@ -78,6 +78,23 @@
 4. `columns=` 预声明的 schema 在实例生命周期内固定；需要增删列时请为新一轮实验创建新的 `ViewWidget`。
 5. `plot()/csvplot()` 的交互分析依赖可选 `pygwalker`/`pandas`，缺失时降级为双窗表格。
 6. 尚未发布 PyPI；安装走 GitHub。
+7. 多次 `show()`（或重跑 cell 不清输出）会累积多个面板：每个面板自带 shadow DOM 与 comm 通道，且旧面板仍接收推送。长实验建议复用同一个面板，或对旧 widget 调用 `close()` 后再新建；详见下方“S1 内存优化”。
+
+## S1 前端内存优化（2026-11-01）
+
+**背景**：长时间高强度实验（约一周）后浏览器标签页内存持续增长，实测达 1.4 GB。专项排查结论：Python 侧无泄露（tracemalloc 稳态 0.26 MB）；主体来自前端两条路径——(a) 每帧 `clearChildren` 后全量重建 6048 个 shadow DOM 节点（depth=1000/5 列，20 帧/秒 ≈ 1.2 亿节点/小时的分配压力，V8 堆持续扩张）；(b) 累积的多个 `show()` 面板（僵尸视图）各自重建并接收推送。
+
+**改动**（`index.mjs`）：`renderPayload` 增量渲染——schema/状态列/高亮列集合不变时保留表骨架，仅原地更新 counts tbody、对齐 detail tbody 行数并逐格写变化的 `textContent`、更新 footer 文本；任一身份键变化则回退原全量重建路径。视图卸载（anywidget teardown）时释放 mounted DOM 引用。DOM 契约不变：单元格 class 与最终文本与全量重建完全一致。
+
+**实测**（`python scripts/mem_baseline.py 3000 50 1000 5`，Edge 无头 + `--expose-gc`）：
+
+| 指标 | 改动前 | 改动后 | 判定 |
+| --- | --- | --- | --- |
+| shadow 节点数（全程） | 每帧重建 6048 个 | **恒定 6048（drift 0）** | PASS |
+| 每帧渲染耗时（mean） | 15.9 ms | **9.0 ms** | PASS（预算 13 ms） |
+| 强制 GC 后堆漂移 | 持续爬升锯齿 | **-0.3 MB（回落基线）** | PASS（预算 5 MB） |
+
+新增回归：`tests/test_stress.py::test_push_loop_memory_bounded`（持续 update+推送 2 s，Python traced < 5 MB、线程无累积）；套件 67 项全绿，ruff 通过。`dev/preview.html`、`dev/demo.html` 由脚本重新生成并保持视觉一致。
 7. Python 3.9 环境下 pip 会自动选择兼容的 anywidget 0.9.x（0.11+ 要求 Python ≥3.10）；本地实测环境为 Python 3.12 + anywidget 0.11，Python 3.9–3.12 的兼容性由 CI 矩阵持续验证。
 
 ## 后续建议

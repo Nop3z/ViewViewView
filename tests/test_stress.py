@@ -50,3 +50,41 @@ def test_bounded_memory_with_live_rows(tmp_path):
     assert current < 40 * 1024 * 1024, f"current traced memory {current / 1e6:.1f} MB"
     assert peak < 40 * 1024 * 1024, f"peak traced memory {peak / 1e6:.1f} MB"
     print(f"\n50k rows, ring=1000: current {current / 1e6:.1f} MB, peak {peak / 1e6:.1f} MB")
+
+
+def test_push_loop_memory_bounded(tmp_path):
+    """S1 guard: sustained update+syncer pressure must not accumulate Python memory."""
+    import threading
+
+    class _Panel:
+        payload = None
+
+    widget = ViewWidget(
+        csv_path=str(tmp_path / "push.csv"),
+        live_rows=1000,
+        flush_every=50,
+        columns={"state": str, "delay": int},
+    )
+    panel = _Panel()
+    widget.syncer.attach(panel)
+
+    tracemalloc.start()
+    threads_before = threading.active_count()
+    deadline = time.perf_counter() + 2.0
+    n = 0
+    while time.perf_counter() < deadline:
+        for _ in range(50):
+            widget.update(state="PASS", delay=n)
+            n += 1
+        widget.syncer._refresh()  # simulate the timer firing at Syncer pace
+    current, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+
+    # The Syncer schedules one short-lived daemon Timer per frame; measure after
+    # they had time to finish instead of asserting a live-thread snapshot.
+    time.sleep(0.3)
+    assert threading.active_count() <= threads_before + 1  # no thread accumulation
+    assert current < 5 * 1024 * 1024, f"push loop leaked {current / 1e6:.2f} MB"
+    widget.close()
+    assert widget.syncer.panel_count() == 0
+    print(f"\n{n} rows + {n // 50} pushes in 2s: traced {current / 1e6:.2f} MB")
