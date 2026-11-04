@@ -127,9 +127,11 @@ function renderPayload(root, payload, ctx) {
   if (canPatch) {
     patchCountsTable(mounted.countsBody, stateKey, counts);
     if (mounted.detailBody !== null) {
-      patchDetailRows(mounted.detailBody, columns, rows, ctx);
+      patchDetailRows(mounted.detailBody, columns, rows, ctx, mounted, payload);
     }
     patchFooter(mounted.footerLabel, payload, rows);
+    mounted.lastRows = rows;
+    mounted.lastTotal = isPayloadObject(payload) ? payload.total : undefined;
     return;
   }
 
@@ -161,6 +163,8 @@ function renderPayload(root, payload, ctx) {
     countsBody: countsPane.querySelector("tbody"),
     detailBody,
     footerLabel: footer.firstChild,
+    lastRows: rows,
+    lastTotal: isPayloadObject(payload) ? payload.total : undefined,
   };
 }
 
@@ -187,19 +191,104 @@ function patchCountsTable(tbody, stateKey, counts) {
   if (tbody === null) {
     return;
   }
-  clearChildren(tbody);
-  for (const [bucket, count] of Object.entries(counts)) {
+  const entries = Object.entries(counts);
+  while (tbody.children.length > entries.length) {
+    tbody.removeChild(tbody.lastChild);
+  }
+  while (tbody.children.length < entries.length) {
     const tr = document.createElement("tr");
     const nameCell = document.createElement("td");
     nameCell.className = "vvv-td";
     const countCell = document.createElement("td");
     countCell.className = "vvv-td vvv-td--num vvv-count";
-    nameCell.textContent = toDisplayText(bucket);
-    countCell.textContent = toDisplayText(count);
     tr.appendChild(nameCell);
     tr.appendChild(countCell);
     tbody.appendChild(tr);
   }
+  entries.forEach(([bucket, count], index) => {
+    const tr = tbody.children[index];
+    const nameCell = tr.children[0];
+    const countCell = tr.children[1];
+    const name = toDisplayText(bucket);
+    const value = toDisplayText(count);
+    if (nameCell.textContent !== name) {
+      nameCell.textContent = name;
+    }
+    if (countCell.textContent !== value) {
+      countCell.textContent = value;
+    }
+  });
+}
+
+/**
+ * Fast path for the ring-window update pattern: K new rows arrive at the top
+ * (K = total_now - total_previous) and, once the window is full, the same
+ * number of oldest rows drop off the bottom. The overlap is verified cell by
+ * cell against the previous payload, then realised with one fragment insert
+ * and K removals — instead of rewriting every cell, which invalidates the
+ * layout of the whole table on every frame.
+ * @returns {boolean} True when the shift was applied.
+ */
+function applyShiftedRows(tbody, columns, rows, ctx, mounted, payload) {
+  const previous = mounted.lastRows;
+  const previousTotal = mounted.lastTotal;
+  const total = isPayloadObject(payload) ? payload.total : undefined;
+  if (!previous || previous.length === 0) {
+    return false;
+  }
+  if (typeof previousTotal !== "number" || typeof total !== "number") {
+    return false;
+  }
+  const fresh = total - previousTotal;
+  if (!Number.isInteger(fresh) || fresh <= 0 || fresh > rows.length) {
+    return false;
+  }
+  // Same window size → dropped as many as arrived; grown by exactly K → no drop.
+  const grew = rows.length === previous.length + fresh;
+  if (!grew && rows.length !== previous.length) {
+    return false;
+  }
+  const compared = Math.min(previous.length, rows.length - fresh);
+  if (compared <= 0) {
+    return false;
+  }
+  for (let rowIndex = 0; rowIndex < compared; rowIndex += 1) {
+    const next = rows[rowIndex + fresh];
+    const prev = previous[rowIndex];
+    if (!Array.isArray(next) || !Array.isArray(prev) || next.length !== prev.length) {
+      return false;
+    }
+    for (let columnIndex = 0; columnIndex < prev.length; columnIndex += 1) {
+      if (next[columnIndex] !== prev[columnIndex]) {
+        return false;
+      }
+    }
+  }
+  const fragment = document.createDocumentFragment();
+  for (let rowIndex = 0; rowIndex < fresh; rowIndex += 1) {
+    const values = rows[rowIndex];
+    if (!Array.isArray(values)) {
+      return false;
+    }
+    const tr = document.createElement("tr");
+    columns.forEach((column, index) => {
+      const td = document.createElement("td");
+      td.className =
+        "vvv-td" +
+        (isNumericType(column.type) ? " vvv-td--num" : "") +
+        (ctx.numberColumns.has(column.name) ? " vvv-num" : "");
+      td.textContent = toDisplayText(values[index]);
+      tr.appendChild(td);
+    });
+    fragment.appendChild(tr);
+  }
+  tbody.insertBefore(fragment, tbody.firstChild);
+  if (!grew) {
+    for (let rowIndex = 0; rowIndex < fresh; rowIndex += 1) {
+      tbody.removeChild(tbody.lastChild);
+    }
+  }
+  return true;
 }
 
 /**
@@ -208,7 +297,10 @@ function patchCountsTable(tbody, stateKey, counts) {
  * difference, and set cell text only when it actually changed.
  * @returns {void}
  */
-function patchDetailRows(tbody, columns, rows, ctx) {
+function patchDetailRows(tbody, columns, rows, ctx, mounted, payload) {
+  if (applyShiftedRows(tbody, columns, rows, ctx, mounted, payload)) {
+    return;
+  }
   // Trim or extend the row count first.
   while (tbody.children.length > rows.length) {
     tbody.removeChild(tbody.lastChild);

@@ -200,6 +200,22 @@ def main() -> int:
               gc(); gc(); gc();
               const endHeap = heapUsed();
 
+              // Correctness: the patched DOM must equal the last payload.
+              const body = shadow.querySelector("table.vvv-table--detail tbody");
+              let domMismatches = 0;
+              const samples = [];
+              for (let i = 0; i < payload.rows.length; i += 1) {
+                const tr = body.children[i];
+                for (let j = 0; j < columns.length; j += 1) {
+                  const raw = payload.rows[i][j];
+                  const want = raw === null || raw === undefined ? "" : String(raw);
+                  const got = tr && tr.children[j] ? tr.children[j].textContent : null;
+                  if (got !== want) {
+                    domMismatches += 1;
+                    if (samples.length < 5) samples.push([i, j, got, want]);
+                  }
+                }
+              }
               return {
                 frames,
                 baseNodes,
@@ -213,6 +229,8 @@ def main() -> int:
                 endHeapMB: endHeap / 1048576,
                 heapDriftMB: (endHeap - baseHeap) / 1048576,
                 wallSeconds: (performance.now() - t0) / 1000,
+                domMismatches,
+                domSamples: samples,
               };
             }
             """,
@@ -237,6 +255,7 @@ def main() -> int:
         f"heap: base={result['baseHeapMB']:.1f}MB end={result['endHeapMB']:.1f}MB "
         f"drift={drift:+.1f}MB (budget {MAX_HEAP_DRIFT_MB}MB)"
     )
+    print(f"dom mismatches: {result['domMismatches']}")
 
     failures = []
     if mean >= MAX_FRAME_MS:
@@ -245,6 +264,11 @@ def main() -> int:
         failures.append(f"forced-GC heap drift {drift:.1f}MB >= {MAX_HEAP_DRIFT_MB}MB")
     if node_drift > MAX_NODE_DRIFT:
         failures.append(f"node count drift {node_drift} > {MAX_NODE_DRIFT}")
+    if result["domMismatches"]:
+        failures.append(
+            f"DOM does not match payload: {result['domMismatches']} cells, "
+            f"samples={result['domSamples']}"
+        )
 
     if failures:
         print("FAIL: " + "; ".join(failures))

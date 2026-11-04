@@ -101,6 +101,26 @@
 - `show(replace=True)`：显示新面板前关闭并脱离本 widget 的上一个面板，`close()` 亦回收当前面板——根治“多次 show()/重跑 cell 面板累积”；默认 `False` 保持 FaultViz 兼容行为。
 - `ViewWidget(frame_delay=...)` / `Syncer(frame_delay=...)`：推送合帧间隔参数化（默认 0.05 s 不变，非法值抛 `ValueError`），供后续按场景调优。
 - 版本号升至 **0.2.0**（`pyproject.toml` + `__init__.__version__`），保证 `pip install -U` 能真正拿到本批修复。
+
+## S4 卡顿根因与 K 行位移优化（2026-11-04）
+
+**现象**：内存稳定在 55~75 MB，但注入期间 FPS 从 120 掉到 75~83；另一台机器掉到 10 FPS。
+
+**测量**（JupyterLab 4 + Edge，1000 行窗口、100 条/秒、20 秒，CDP `Performance.getMetrics`）：
+
+| 指标（20 秒窗口累计） | 优化前 | 优化后 |
+| --- | --- | --- |
+| LayoutDuration（布局） | **4.80 s** | **1.14 s（-76%）** |
+| TaskDuration（主线程忙） | 11.98 s | 7.33 s |
+| ScriptDuration（JS 执行） | 0.13 s | 0.14 s |
+| RecalcStyleDuration | 0.51 s | 0.71 s |
+| 注入期间 FPS | 75~83 | **100~107** |
+
+**根因**：payload 为“最新在前”，每帧新增 K 行（`100 条/秒 ÷ 20 帧/秒 = 5 行`）导致整张表错位；按索引逐格 diff 会把 1000×5 个单元格全部改写，每次写入都让表格布局失效。JS 本身只占 0.13 s，**瓶颈是布局（4.8 s）**，所以内存不高但帧率掉。
+
+**修复**（`index.mjs: applyShiftedRows`）：用 `payload.total` 的增量算出本帧新增行数 K，逐格校验“新 rows[K..] == 旧 rows[0..]”后，改用一次 `DocumentFragment` 插入 K 行 + 从底部移除 K 行；校验不通过则回退原逐格 diff。`patchCountsTable` 同时改为原地更新文本。
+
+**正确性**：`scripts/mem_baseline.py` 新增逐格断言——渲染后的 DOM 必须与最后一份 payload 完全一致（3000 帧：0 处不一致）；JS 单帧耗时 4.07 ms → **0.21 ms**。套件 69 项全绿。
 7. Python 3.9 环境下 pip 会自动选择兼容的 anywidget 0.9.x（0.11+ 要求 Python ≥3.10）；本地实测环境为 Python 3.12 + anywidget 0.11，Python 3.9–3.12 的兼容性由 CI 矩阵持续验证。
 
 ## 后续建议

@@ -125,6 +125,6 @@ def test_csvplot_without_pandas_also_falls_back(monkeypatch, tmp_path):
 
 def test_viewviewview_exports():
     assert viewviewview.ViewViewView is viewviewview.ViewWidget
-    assert viewviewview.__version__ == "0.2.0"
+    assert viewviewview.__version__ == "0.2.1"
     for name in ("ViewWidget", "start_view_service", "csvview", "csvplot"):
         assert getattr(viewviewview, name) is not None
