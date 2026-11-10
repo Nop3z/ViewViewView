@@ -553,16 +553,17 @@ function attachStatsHoverTag(pane) {
 
 /**
  * Optional third pane (right of the detail pane): vertical delay-bucket bar
- * charts arranged like quadrants — 成功率 (top-left) and HANG率 (bottom-left)
+ * charts arranged like quadrants — 成功分布 (top-left) and HANG分布 (bottom-left)
  * share the left column, while an optional user-defined state chart via
  * ``stats_custom=`` owns the right column (first + fourth quadrant), so the
- * three plots stay close together instead of splitting far apart. The x axis
- * runs along the delay timeline (bucket start ascending), so anomalies stand
- * out against their left/right neighbours; bars grow upward from a shared
+ * three plots stay close together instead of splitting far apart. Every
+ * chart is a share-of-total distribution over the delay timeline. The x
+ * axis runs along the delay timeline (bucket start ascending), so anomalies
+ * stand out against their neighbours; bars grow upward from a shared
  * baseline. Node count is constant: ``bars`` columns per chart are created
  * once here and then only label texts/tooltips/bar heights are patched, so
  * live frames never rebuild the pane. The custom chart anchors to the pane
- * bottom (flush with HANG率) and stretches across a doubled plot area.
+ * bottom (flush with HANG分布) and stretches across a doubled plot area.
  * @returns {{ pane: HTMLElement, handles: object }}
  */
 function buildStatsPane(stats) {
@@ -573,8 +574,8 @@ function buildStatsPane(stats) {
   const successValue =
     stats && typeof stats.success === "string" ? stats.success : "";
   const hangValue = stats && typeof stats.hang === "string" ? stats.hang : "";
-  const successChart = buildStatChart("成功率", successValue, bars, "");
-  const hangChart = buildStatChart("HANG率", hangValue, bars, "vvv-stat-fill--hang");
+  const successChart = buildStatChart("成功分布", successValue, bars, "");
+  const hangChart = buildStatChart("HANG分布", hangValue, bars, "vvv-stat-fill--hang");
   const layout = document.createElement("div");
   layout.className = "vvv-stats-layout";
   const successBlock = document.createElement("div");
@@ -591,7 +592,7 @@ function buildStatsPane(stats) {
   if (custom !== "") {
     pane.classList.add("vvv-pane--stats-custom");
     customChart = buildStatChart(
-      `${custom}率`,
+      `${custom}分布`,
       custom,
       bars,
       "vvv-stat-fill--custom",
@@ -682,6 +683,9 @@ function patchStatsPane(handles, stats) {
     return;
   }
   const buckets = Array.isArray(stats.buckets) ? stats.buckets : [];
+  // All three charts are distributions with bar heights normalized to the
+  // chart's tallest bucket (rare states stay visible), while hover keeps
+  // reporting each bucket's true share of the state's cumulative total.
   updateStatChart(handles.cols.success, buckets, handles.bars, 3, "成功");
   updateStatChart(handles.cols.hang, buckets, handles.bars, 4, "HANG");
   if (handles.cols.custom !== null && handles.custom !== "") {
@@ -721,12 +725,23 @@ const STAT_PLOT_CUSTOM_PX = STAT_PLOT_PX * 2;
  * hover tag prints above a column the moment the pointer enters it (the
  * native ``title`` delay is too slow to be seen while scanning bars).
  * Height uses px units, so no percentage-normalization concerns apply here.
+ * Bar heights scale relative to the chart's tallest bucket (distribution
+ * silhouette fills the plot); the data-tip/aria-label numbers keep the
+ * TRUE share of the state's cumulative total.
  * @param {number} [plotPx] plot height for this chart (px); defaults to the
  *   shared STAT_PLOT_PX, the custom chart passes STAT_PLOT_CUSTOM_PX.
  * @returns {void}
  */
-function updateStatChart(cols, buckets, maxBars, metricIndex, metricLabel, plotPx = STAT_PLOT_PX) {
+function updateStatChart(
+  cols,
+  buckets,
+  maxBars,
+  metricIndex,
+  metricLabel,
+  plotPx = STAT_PLOT_PX,
+) {
   const entries = [];
+  let totalHits = 0;
   for (const bucket of buckets) {
     if (!Array.isArray(bucket) || bucket.length < 5) {
       continue;
@@ -746,10 +761,25 @@ function updateStatChart(cols, buckets, maxBars, metricIndex, metricLabel, plotP
       hi: bucket[1],
       total,
       hits,
-      rate: Math.min(hits / total, 1),
     });
+    totalHits += hits;
   }
   entries.sort((a, b) => a.lo - b.lo || a.hi - b.hi);
+  // Read-visibility pass: bar heights scale relative to the chart's TALLEST
+  // bucket, so the distribution silhouette fills the plot even when the
+  // state (success, HANG, the custom one) is rare and its raw shares are
+  // single-digit percentages. The hover tag keeps reporting the TRUE share
+  // of the cumulative total.
+  let maxHits = 0;
+  for (const entry of entries) {
+    if (entry.hits > maxHits) {
+      maxHits = entry.hits;
+    }
+  }
+  for (const entry of entries) {
+    entry.rate = maxHits > 0 ? Math.min(entry.hits / maxHits, 1) : 0;
+    entry.share = totalHits > 0 ? Math.min(entry.hits / totalHits, 1) : 0;
+  }
   const visible = entries.slice(Math.max(0, entries.length - maxBars));
   for (let index = 0; index < cols.length; index += 1) {
     const col = cols[index];
@@ -764,8 +794,8 @@ function updateStatChart(cols, buckets, maxBars, metricIndex, metricLabel, plotP
       col.style.display = "";
     }
     const label = `${toCount(entry.lo, "?")}-${toCount(entry.hi, "?")}`;
-    const title = `${label} · ${metricLabel} ${entry.hits}/${entry.total} · ${(
-      entry.rate * 100
+    const title = `${label} · ${metricLabel} ${entry.hits}/${totalHits} · ${(
+      entry.share * 100
     ).toFixed(1)}%`;
     const height = Math.max(Math.round(entry.rate * plotPx), 0);
     const fillEl = col.children[0];

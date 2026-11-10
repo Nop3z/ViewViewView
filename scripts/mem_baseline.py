@@ -300,12 +300,16 @@ def main() -> int:
                 }
                 const maxBars = finalStats.bars;
                 for (let chart = 0; chart < charts.length; chart += 1) {
-                  // chart order: 成功率, HANG率, then the optional custom one.
-                  // metric index into [lo, hi, total, ok, hang, custom]
+                  // chart order: 成功分布, HANG分布, then the optional custom
+                  // one. metric index into [lo, hi, total, ok, hang, custom];
+                  // bar heights are normalized to the chart's tallest bucket
+                  // (matching the frontend) while the hover tag keeps the
+                  // true share of the metric's cumulative total.
                   const metric = chart === 0 ? 3 : chart === 1 ? 4 : 5;
                   const metricLabel =
                     chart === 0 ? "成功" : chart === 1 ? "HANG" : "FAIL";
                   const entries = [];
+                  let totalHits = 0;
                   for (const b of finalStats.buckets) {
                     if (
                       b[2] > 0 &&
@@ -317,16 +321,26 @@ def main() -> int:
                         b[1],
                         b[2],
                         b[metric],
-                        Math.min(b[metric] / b[2], 1),
+                        0,
+                        0,
                       ]);
+                      totalHits += b[metric];
                     }
                   }
                   entries.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+                  let maxHits = 0;
+                  for (const e of entries) {
+                    if (e[3] > maxHits) maxHits = e[3];
+                  }
+                  for (const e of entries) {
+                    e[4] = maxHits > 0 ? Math.min(e[3] / maxHits, 1) : 0;
+                    e[5] = totalHits > 0 ? Math.min(e[3] / totalHits, 1) : 0;
+                  }
                   const visible = entries.slice(
                     Math.max(0, entries.length - maxBars),
                   );
-                  // 成功率/HANG率 use the shared 122px plot; the custom chart
-                  // stretches across a doubled 244px plot area.
+                  // 成功分布/HANG分布 use the shared 122px plot; the custom
+                  // chart stretches across a doubled 244px plot area.
                   const plotPx = chart === 2 ? 244 : 122;
                   const cols = Array.from(charts[chart].children).filter(
                     (node) =>
@@ -349,8 +363,8 @@ def main() -> int:
                       return;
                     }
                     const label = `${want[0]}-${want[1]}`;
-                    const cite = `${label} · ${metricLabel} ${want[3]}/${want[2]} · ${(
-                      want[4] * 100
+                    const cite = `${label} · ${metricLabel} ${want[3]}/${totalHits} · ${(
+                      want[5] * 100
                     ).toFixed(1)}%`;
                     const wantHeight = Math.max(Math.round(want[4] * plotPx), 0);
                     const labelText = col.children[1].textContent;

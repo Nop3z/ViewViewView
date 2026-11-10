@@ -37,6 +37,7 @@ ViewViewView 用纯 Python 重写了同一条数据通路，只保留必要环�
 - **受限内存**：`live_rows` 环形窗口，任意注入量级内存恒定
 - **深色主题**：黑色背景、白色字符串文字、绿色计数与 `delay`/`pulse` 数值列（均 `#19ff25`）；`errcode` 等其他数值列保持白色，颜色与高亮列均可通过 `colors=` / `number_columns=` 自定义
 - **线程安全**：`update/flush/close` 可在工作线程并发调用
+- **Delay 统计分布图（默认开启，v0.6.0）**：明细窗右侧三幅竖直分布图按 delay 时间轴展示成功 / HANG / 自定义状态的落点分布；柱高归一化拉满，悬停直读真实占比；`stats_bucket=` 调桶宽、`=0` 关闭
 - **零前端依赖**：anywidget 单文件 ESM + Shadow DOM，不拉取 CDN、不需要 npm 构建
 
 ## 安装
@@ -152,44 +153,33 @@ vt = faultviz.ViewWidget(number_columns=["delay", "pulse", "voltage_mv"])
 
 传空列表则所有明细列都不使用绿色；`state`/`reply` 等字符串列始终为白色。
 
-### Delay 统计面板（默认开启，v0.5.0）
+### Delay 统计面板（默认开启，v0.6.0）
 
-明细窗右侧自带 delay 分桶统计面板：竖直柱状图按**象限布局**——
-**成功率**（左上，命中 `stats_success` 状态的比例，默认 `PASS`）与
-**HANG率**（左下，默认 `HANG`）共用左列，用户自定义的第三状态图（`stats_custom=`）
-独占右列：贴底与 HANG率 齐平，绘图区拉长一倍，柱色 `#4d33ff`（用户指定的 `#18097d`
-在暗色主题下偏暗，提亮为同系靛蓝；刷新即可改回）。
-横轴按 delay 时间轴从左到右递增（桶标签如 `500-600`、`600-700`…），柱子从基线向上生长，
-便于对照左右邻桶发现异常点；柱数超出上限时保留**最新一段**时间轴：
+明细窗右侧自带三幅竖直**分布图**（2×2 象限布局，横轴 = delay 时间轴递增）：
 
 ```python
-vt = faultviz.ViewWidget()   # 统计面板默认开启，桶宽 100（delay 的最小单位）
-# 想指定桶宽就填这一个数；其他参数按需才调：
-#   stats_bucket=50,       # 换桶宽（0=关闭统计面板，完全回到旧界面）
-#   stats_custom="FAIL",   # 自定义第三状态图（右列整幅，贴底拉长，#4d33ff；默认不显示）
+vt = faultviz.ViewWidget()   # 面板默认开启，桶宽 100；要改就填这一个数
+
+#   stats_bucket=50,       # 桶宽（0=关闭面板，完全回到 FaultViz 界面）
+#   stats_custom="FAIL",   # 自定义第三状态分布图（右列整幅，#4d33ff）
 #   stats_state="result",  # 分类列名（默认 state）
 #   stats_delay="ms",      # 分桶列名（默认 delay）
-#   stats_success="OK",    # 记为“成功”的状态值（默认 PASS）
-#   stats_hang="STUCK",    # 记为“HANG”的状态值（默认 HANG）
-#   stats_bars=20,         # 每幅图柱数（默认 30，最多 50）
-#   stats_interval=5,      # 每 5 帧推送一次统计
+#   stats_success="OK",    # “成功”状态值（默认 PASS）
+#   stats_hang="STUCK",    # “HANG”状态值（默认 HANG）
+#   stats_bars=20,         # 每图柱数（默认 30，最多 50）
+#   stats_interval=5,      # 节流帧数（默认 5）
 ```
 
-行为说明：
+要点：
 
-- **数据源是 CSV 本尊**：每条被接受的记录都会计入统计（与 `vt.rows_written` 一致），
-  滚出显示窗口的旧行不会被遗忘；
-- **省内存/防卡顿**：图表节点池固定（每图 `stats_bars` 个常驻节点，只改文字与柱高）；
-  统计按 `stats_interval` 节流推送，`_build_payload_locked` 里不会每帧重算排序；
-- 悬停任意柱条即时显示精确值标签（如 `2000-2100 · HANG 12/15 · 80.0%`）；
-  悬停标签是常驻节点，只在鼠标事件时定位/显隐，不参与实时分帧；
-- `stats_custom=` 是加法式扩展：设置后 payload 的桶行带第 6 个计数值并出现
-  `custom` 键（仅在你传入参数时）；计数独立于 success/hang（把 `stats_custom`
-  设为已图表化的值会得到一张完全镜像的图，而不是恒为 0）；
-- delay 非数值（或 state/delay 列不存在）的记录自动跳过；列名对不上时 show() 会出
-  一行 INFO 提示把 `stats_state=` / `stats_delay=` 指向真实列名；
-- 极端 delay 范围下桶数封顶 512，超限自动把桶宽翻倍合并（payload 会带新的桶宽）；
-- `stats_bucket=0` 时 payload 完全不含 `stats`，界面与 FaultViz/0.3.x 完全一致。
+- **分布口径 + 自动拉满**：柱高按图内最高桶归一化（最高桶撑满绘图区，低频状态
+  也看得清分布轮廓，读形不看绝对值）；真实占比看悬停（分母 = 该状态累计总数）；
+- **悬停读数**：`1500-1600 · 成功 42/87 · 48.3%`（87 = 累计总成功数）；
+- 左列 成功分布 / HANG分布，自定义图占右列整幅（贴底与 HANG分布 齐平，柱更长）；
+- 数据源 = CSV 本尊（滚出窗口的行也计入）；节点池固定 + 节流推送，不引入卡顿；
+- delay 非数值或列名对不上时该行跳过，show() 会提示改 `stats_state=`/`stats_delay=`；
+- 桶数封顶 512，超限自动翻倍合并；`stats_bucket=0` 时 payload 无 `stats` 键，
+  界面与旧版完全一致。
 
 ### CSV-only 记录（不打开界面）
 

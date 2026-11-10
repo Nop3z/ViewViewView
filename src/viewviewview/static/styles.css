@@ -87,7 +87,7 @@
 /* Fixed-width charts pane; node count is constant, only texts/heights patch.
  * The right margin keeps the charts away from the screen edge (16:9 full
  * browsers pin the widget against the monitor border otherwise). Plain
- * mode is one column (成功率 / HANG率 stacked); with stats_custom= the pane
+ * mode is one column (成功分布 / HANG分布 stacked); with stats_custom= the pane
  * widens into a 2×2 quadrant grid and the custom chart owns the right
  * column (spans both rows). */
 .vvv-pane--stats {
@@ -106,7 +106,7 @@
   flex: 0 0 576px;
 }
 
-/* Quadrant layout: q2 = top-left (成功率), q3 = bottom-left (HANG率),
+/* Quadrant layout: q2 = top-left (成功分布), q3 = bottom-left (HANG分布),
  * custom = right column spanning both rows (第一/第四象限). */
 .vvv-stats-layout {
   column-gap: 12px;
@@ -140,8 +140,8 @@
   flex-direction: column;
   grid-column: 2;
   grid-row: 1 / span 2;
-  /* Title rides the top row (level with 成功率), the chart anchors to the
-   * bottom row so its baseline and labels sit flush with HANG率. */
+  /* Title rides the top row (level with 成功分布), the chart anchors to the
+   * bottom row so its baseline and labels sit flush with HANG分布. */
   justify-content: space-between;
 }
 
@@ -213,7 +213,7 @@
   width: 100%;
 }
 
-/* HANG率 bars share the warning red (palette has no red token yet). */
+/* HANG分布 bars share the warning red (palette has no red token yet). */
 .vvv-stat-fill--hang {
   background: #e05252;
 }
