@@ -60,6 +60,9 @@ function render({ model, el }) {
     layout,
     mounted,
     numberColumns: readNumberColumns(model.get("number_columns")),
+    // Last stats block seen in any payload (§stats): keeps the pane usable
+    // while the Python side skips stats on interval-gated frames.
+    lastStats: null,
     redraw: () => draw(model.get("payload")),
   };
   const draw = (payload) => renderPayload(root, payload, ctx);
@@ -88,6 +91,7 @@ function render({ model, el }) {
 
   return () => {
     ctx.mounted = null; // drop DOM references so the removed view can be GC'd
+    ctx.lastStats = null;
     if (typeof model.off === "function") {
       model.off("change:payload", onPayloadChange);
       model.off("change:theme", onThemeChange);
@@ -110,13 +114,25 @@ function renderPayload(root, payload, ctx) {
   const counts = readCounts(payload);
   const rows = readRows(payload);
   const hasCounts = Object.keys(counts).length > 0;
-  const schemaKey = layoutKey(columns, readStateKey(payload), ctx.numberColumns);
   const stateKey = readStateKey(payload);
 
-  // Fast path: same schema/state/number-columns as the currently mounted
-  // panes -> update the mounted tables in place instead of rebuilding ~6000
-  // nodes per frame. The DOM contract is unchanged: cell classes and text
-  // content end up exactly what a full rebuild would produce.
+  // Optional stats block: remember the newest one seen so the pane survives
+  // interval-gated frames that carry no stats at all.
+  const stats = readStats(payload);
+  if (stats !== null) {
+    ctx.lastStats = stats;
+  }
+  const schemaKey = layoutKey(
+    columns,
+    stateKey,
+    ctx.numberColumns,
+    statsKey(ctx.lastStats),
+  );
+
+  // Fast path: same schema/state/number-columns/stats config as the currently
+  // mounted panes -> update the mounted tables in place instead of rebuilding
+  // ~6000 nodes per frame. The DOM contract is unchanged: cell classes and
+  // text content end up exactly what a full rebuild would produce.
   const mounted = ctx.mounted;
   const canPatch =
     mounted !== null &&
@@ -129,6 +145,9 @@ function renderPayload(root, payload, ctx) {
     if (mounted.detailBody !== null) {
       patchDetailRows(mounted.detailBody, columns, rows, ctx, mounted, payload);
     }
+    if (mounted.stats !== null) {
+      patchStatsPane(mounted.stats, ctx.lastStats);
+    }
     patchFooter(mounted.footerLabel, payload, rows);
     mounted.lastRows = rows;
     mounted.lastTotal = isPayloadObject(payload) ? payload.total : undefined;
@@ -138,6 +157,7 @@ function renderPayload(root, payload, ctx) {
   clearChildren(root);
   if (columns.length === 0 && rows.length === 0 && !hasCounts) {
     ctx.mounted = null;
+    ctx.lastStats = null;
     root.appendChild(buildNote("No data recorded."));
     return;
   }
@@ -148,11 +168,25 @@ function renderPayload(root, payload, ctx) {
   // §3.2 limit=0 → counts-only payload (no detail pane); rows arrive
   // newest-first already (§4.3), so render them in array order as-is.
   // Declared columns render even before the first record (empty tbody).
+  // With the stats pane enabled the detail pane and the charts share one
+  // horizontal band (detail left, charts right of it).
+  const statsPane = ctx.lastStats ? buildStatsPane(ctx.lastStats) : null;
+
   let detailBody = null;
   if (columns.length > 0) {
     const detailPane = buildDetailPane(columns, rows, ctx);
-    root.appendChild(detailPane);
+    if (statsPane !== null) {
+      const band = document.createElement("div");
+      band.className = "vvv-band";
+      band.appendChild(detailPane);
+      band.appendChild(statsPane.pane);
+      root.appendChild(band);
+    } else {
+      root.appendChild(detailPane);
+    }
     detailBody = detailPane.querySelector("tbody");
+  } else if (statsPane !== null) {
+    root.appendChild(statsPane.pane);
   }
 
   const footer = buildFooter(payload, rows);
@@ -165,21 +199,23 @@ function renderPayload(root, payload, ctx) {
     footerLabel: footer.firstChild,
     lastRows: rows,
     lastTotal: isPayloadObject(payload) ? payload.total : undefined,
+    stats: statsPane ? statsPane.handles : null,
   };
 }
 
 /**
  * Stable identity for the mounted pane skeleton: column names+types, the
- * state column and the number-highlight set. Any change forces one full
- * rebuild (the old path), after which in-place updates resume.
+ * state column, the number-highlight set and the stats-pane config. Any
+ * change forces one full rebuild (the old path), after which in-place
+ * updates resume.
  * @returns {string}
  */
-function layoutKey(columns, stateKey, numberColumns) {
+function layoutKey(columns, stateKey, numberColumns, statsConfigKey) {
   const cols = columns
     .map((column) => `${column.name}:${column.type ?? "?"}`)
     .join("|");
   const numbers = Array.from(numberColumns).join(",");
-  return `${stateKey ?? ""};${cols};${numbers}`;
+  return `${stateKey ?? ""};${cols};${numbers};${statsConfigKey ?? ""}`;
 }
 
 /**
@@ -379,6 +415,36 @@ function readStateKey(payload) {
 }
 
 /**
+ * @returns {{ bucket: number, bars: number, success: string, hang: string,
+ *   rows: number, buckets: unknown[] } | null} The optional stats block.
+ */
+function readStats(payload) {
+  return isPayloadObject(payload) && isPayloadObject(payload.stats)
+    ? payload.stats
+    : null;
+}
+
+/** @returns {number} Bars per chart (1..50, default 12), defensively clamped. */
+function readBars(stats) {
+  const value = stats && typeof stats.bars === "number" ? stats.bars : 12;
+  return Math.min(50, Math.max(1, Math.floor(value)));
+}
+
+/**
+ * Sig of the stats-pane config only (bucket width / bar count / labels). A
+ * change forces one full rebuild; data-only changes patch in place.
+ * @returns {string}
+ */
+function statsKey(stats) {
+  if (stats === null) {
+    return "";
+  }
+  return `${readBars(stats)};${toCount(stats.bucket, "-")};${toDisplayText(
+    stats.success,
+  )};${toDisplayText(stats.hang)}`;
+}
+
+/**
  * Top pane: category statistics. No state column → graceful empty state.
  * @param {string | null} stateKey
  * @param {Record<string, unknown>} counts
@@ -433,6 +499,167 @@ function buildDetailPane(columns, rows, ctx) {
   pane.className = "vvv-pane vvv-pane--detail";
   pane.appendChild(buildDetailTable(columns, rows, ctx));
   return pane;
+}
+
+/**
+ * Optional third pane (right of the detail pane): two delay-bucket bar
+ * charts — 成功率 by ``stats.success`` and HANG率 by ``stats.hang``, both
+ * ranked highest-probability first. Node count is constant: ``bars`` rows
+ * per chart are created once here and then only label/value texts and bar
+ * widths are patched, so live frames never rebuild the pane.
+ * @returns {{ pane: HTMLElement, handles: object }}
+ */
+function buildStatsPane(stats) {
+  const pane = document.createElement("section");
+  pane.className = "vvv-pane vvv-pane--stats";
+  const bars = readBars(stats);
+  const successChart = buildStatChart(
+    "成功率",
+    stats && typeof stats.success === "string" ? stats.success : "",
+    bars,
+    "",
+  );
+  const hangChart = buildStatChart(
+    "HANG率",
+    stats && typeof stats.hang === "string" ? stats.hang : "",
+    bars,
+    "vvv-stat-fill--hang",
+  );
+  pane.appendChild(successChart.head);
+  pane.appendChild(successChart.body);
+  const divider = document.createElement("div");
+  divider.className = "vvv-stats-divider";
+  pane.appendChild(divider);
+  pane.appendChild(hangChart.head);
+  pane.appendChild(hangChart.body);
+  const note = document.createElement("div");
+  note.className = "vvv-stats-note";
+  pane.appendChild(note);
+  const handles = {
+    note,
+    bars,
+    rows: { success: successChart.rows, hang: hangChart.rows },
+  };
+  patchStatsPane(handles, stats);
+  return { pane, handles };
+}
+
+/**
+ * One chart block: header (`title` + matched state value) plus a fixed pool
+ * of `bars` hidden rows; hidden until the first data arrives.
+ * @returns {{ head: HTMLElement, body: HTMLElement, rows: HTMLElement[], fill: HTMLElement }}
+ */
+function buildStatChart(title, stateLabel, bars, fillClass) {
+  const head = document.createElement("div");
+  head.className = "vvv-stats-title";
+  head.textContent = title;
+  const value = document.createElement("span");
+  value.className = "vvv-stats-title-value";
+  value.textContent = stateLabel ?? "";
+  head.appendChild(value);
+  const body = document.createElement("div");
+  body.className = "vvv-stats-body";
+  const rows = [];
+  for (let index = 0; index < bars; index += 1) {
+    const row = document.createElement("div");
+    row.className = "vvv-stat-row";
+    row.style.display = "none";
+    const label = document.createElement("span");
+    label.className = "vvv-stat-label";
+    const track = document.createElement("div");
+    track.className = "vvv-stat-track";
+    const barFill = document.createElement("div");
+    barFill.className = `vvv-stat-fill${fillClass ? ` ${fillClass}` : ""}`;
+    track.appendChild(barFill);
+    const valueText = document.createElement("span");
+    valueText.className = "vvv-stat-value";
+    row.appendChild(label);
+    row.appendChild(track);
+    row.appendChild(valueText);
+    body.appendChild(row);
+    rows.push(row);
+  }
+  return { head, body, rows };
+}
+
+/**
+ * Patch both charts from one stats snapshot (already defensively shaped).
+ * Buckets without any record hide; visible rows are the highest-probability
+ * ranking (rate descending, ties by bucket start ascending).
+ * @returns {void}
+ */
+function patchStatsPane(handles, stats) {
+  if (handles === null || stats === null) {
+    return;
+  }
+  const buckets = Array.isArray(stats.buckets) ? stats.buckets : [];
+  updateStatChart(handles.rows.success, buckets, handles.bars, 3);
+  updateStatChart(handles.rows.hang, buckets, handles.bars, 4);
+  const note = `单位 ${toCount(stats.bucket, "-")} · 共 ${toCount(stats.rows, "0")} 行已统计`;
+  if (handles.note.textContent !== note) {
+    handles.note.textContent = note;
+  }
+}
+
+/**
+ * Align one chart's fixed row pool to the ranked view of ``buckets``:
+ * only changed texts/bar widths are written (no DOM nodes are created).
+ * @returns {void}
+ */
+function updateStatChart(rows, buckets, maxBars, metricIndex) {
+  const entries = [];
+  for (const bucket of buckets) {
+    if (!Array.isArray(bucket) || bucket.length < 5) {
+      continue;
+    }
+    const total = bucket[2];
+    const hits = bucket[metricIndex];
+    if (
+      typeof total !== "number" ||
+      !(total > 0) ||
+      typeof hits !== "number" ||
+      hits < 0
+    ) {
+      continue;
+    }
+    entries.push({
+      lo: bucket[0],
+      hi: bucket[1],
+      rate: Math.min(hits / total, 1),
+    });
+  }
+  entries.sort((a, b) => b.rate - a.rate || a.lo - b.lo || a.hi - b.hi);
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
+    const entry = index < entries.length ? entries[index] : null;
+    if (entry === null) {
+      if (row.style.display !== "none") {
+        row.style.display = "none";
+      }
+      continue;
+    }
+    if (row.style.display !== "") {
+      row.style.display = "";
+    }
+    const label = `${toCount(entry.lo, "?")}-${toCount(entry.hi, "?")}`;
+    const value = `${(entry.rate * 100).toFixed(1)}%`;
+    const widthValue = entry.rate * 100;
+    const labelEl = row.children[0];
+    const valueEl = row.children[2];
+    const fillEl = row.children[1].firstChild;
+    if (labelEl.textContent !== label) {
+      labelEl.textContent = label;
+    }
+    if (valueEl.textContent !== value) {
+      valueEl.textContent = value;
+    }
+    // The browser normalizes e.g. "25.00%" to "25%", so compare numerically
+    // and skip the write when the stored width already rounds the same.
+    const storedWidth = parseFloat(fillEl.style.width);
+    if (!(Math.abs(storedWidth - widthValue) <= 0.005)) {
+      fillEl.style.width = `${widthValue.toFixed(2)}%`;
+    }
+  }
 }
 
 /** Header cells `int|float` → right-aligned, `str` → left-aligned. */

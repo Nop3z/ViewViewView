@@ -12,9 +12,11 @@ from __future__ import annotations
 import contextlib
 import csv
 import logging
+import math
 import os
 import re
 import threading
+import time
 from collections import deque
 from collections.abc import Mapping, Sequence
 from datetime import datetime
@@ -32,6 +34,7 @@ _LOGGER = logging.getLogger("viewviewview")
 _DEFAULT_RING_DEPTH = 2000   # default memory window cap when live_rows is None
 _DEFAULT_DETAIL_ROWS = 200   # default payload detail depth (contract 4.3)
 _MAX_WINDOW_ROWS = 2000      # payload rows hard cap
+_MAX_STATS_BUCKETS = 512     # delay-bucket cap; wider buckets merge coarsen-safe
 _FRAME_DELAY = 0.05          # Syncer frame-merge delay in seconds (4.1)
 
 
@@ -166,6 +169,28 @@ def _validate_flush_every(flush_every: Any) -> None:
 def _validate_fsync(fsync: Any) -> None:
     if type(fsync) is not bool:
         raise ValueError("fsync must be a bool")
+
+
+def _validate_stats_bucket(stats_bucket: Any) -> None:
+    if type(stats_bucket) is not int or stats_bucket < 0:
+        raise ValueError(
+            "stats_bucket must be a non-negative integer (0 disables the stats pane)"
+        )
+
+
+def _validate_stats_interval(stats_interval: Any) -> None:
+    if type(stats_interval) is not int or stats_interval < 1:
+        raise ValueError("stats_interval must be a positive integer")
+
+
+def _validate_stats_bars(stats_bars: Any) -> None:
+    if type(stats_bars) is not int or not 1 <= stats_bars <= 50:
+        raise ValueError("stats_bars must be an integer between 1 and 50")
+
+
+def _validate_stats_name(name: Any, argname: str) -> None:
+    if not isinstance(name, str) or not name:
+        raise ValueError(f"{argname} must be a non-empty string")
 
 
 def _ipython_available() -> bool:
@@ -387,11 +412,25 @@ class ViewWidget:
         colors: Optional[Mapping[str, str]] = None,
         number_columns: Optional[Sequence[str]] = None,
         frame_delay: Optional[float] = None,
+        stats_bucket: int = 0,
+        stats_interval: int = 5,
+        stats_bars: int = 12,
+        stats_state: str = "state",
+        stats_delay: str = "delay",
+        stats_success: str = "PASS",
+        stats_hang: str = "HANG",
     ) -> None:
         _validate_limit(display_limit)
         _validate_limit(live_rows)
         _validate_flush_every(flush_every)
         _validate_fsync(fsync)
+        _validate_stats_bucket(stats_bucket)
+        _validate_stats_interval(stats_interval)
+        _validate_stats_bars(stats_bars)
+        _validate_stats_name(stats_state, "stats_state")
+        _validate_stats_name(stats_delay, "stats_delay")
+        _validate_stats_name(stats_success, "stats_success")
+        _validate_stats_name(stats_hang, "stats_hang")
         if columns is None:
             schema_names: List[str] = []
             schema_types: List[Optional[type]] = []
@@ -441,6 +480,28 @@ class ViewWidget:
         self._selected_state: str = "state"
         self._selected_depth: Optional[int] = None
         self._shown_panel: Any = None
+
+        # Optional delay-statistics pane (stats_bucket=0 disables everything).
+        # ``_stats`` mirrors every accepted CSV record: bucket start -> [total,
+        # success, hang]. Rows rotated out of the live window keep counting,
+        # so the pane aggregates the CSV channel, not the display window.
+        # Refresh traffic is time-gated (interval x frame-delay, default
+        # 0.25 s) and a settle timer pushes one final stats payload after
+        # the flow goes quiet — so even a fast one-shot burst renders.
+        self._stats_bucket: int = stats_bucket
+        self._stats_interval: int = stats_interval
+        self._stats_bars: int = stats_bars
+        self._stats_state_name: str = stats_state
+        self._stats_delay_name: str = stats_delay
+        self._stats_success: str = stats_success
+        self._stats_hang: str = stats_hang
+        self._stats: Dict[int, List[int]] = {}
+        self._stats_min_gap: float = stats_interval * (
+            _FRAME_DELAY if frame_delay is None else _validate_frame_delay(frame_delay)
+        )
+        self._stats_last_attach: float = float("-inf")
+        self._stats_force: bool = False
+        self._stats_settle_timer: Optional[threading.Timer] = None
 
         self._syncer = Syncer(
             self._build_live_snapshot, _LOGGER, frame_delay=frame_delay
@@ -531,6 +592,8 @@ class ViewWidget:
             self._rows_written += 1
             self._record_in_memory_locked(values)
             self._syncer.wake()
+            if self._stats_bucket:
+                self._schedule_stats_settle_locked()
             return True
 
     def flush(self) -> None:
@@ -555,8 +618,11 @@ class ViewWidget:
             self._syncer.detach_all()
             handle, self._csv_file, self._csv_writer = self._csv_file, None, None
             self._closed = True
+            settle_timer, self._stats_settle_timer = self._stats_settle_timer, None
             panel = self._shown_panel
             self._shown_panel = None
+        if settle_timer is not None:
+            settle_timer.cancel()
         if handle is not None:
             try:
                 handle.close()
@@ -598,7 +664,9 @@ class ViewWidget:
                 _LOGGER.info("No data recorded yet; showing the declared columns.")
             self._selected_state = state
             self._selected_depth = self._resolve_depth(limit, full)
-            payload = self._build_payload_locked(state, self._selected_depth)
+            payload = self._build_payload_locked(
+                state, self._selected_depth, include_stats=True
+            )
             previous = self._shown_panel if replace else None
             self._shown_panel = None
         if previous is not None:
@@ -680,7 +748,7 @@ class ViewWidget:
         return True
 
     def _record_in_memory_locked(self, values: List[Any]) -> None:
-        """Update counts (str columns only) and the ring buffer (contract 2)."""
+        """Update counts (str columns only), the ring buffer and stats (2)."""
         for index, (name, value_type) in enumerate(self._schema):
             if value_type is not str:
                 continue
@@ -688,6 +756,92 @@ class ViewWidget:
             key = str(values[index])
             column_counts[key] = column_counts.get(key, 0) + 1
         self._ring.append(tuple(values))
+        self._record_stats_locked(values)
+
+    def _schedule_stats_settle_locked(self) -> None:
+        """Arm (once) a quiet-period timer that pushes the final stats frame.
+
+        Frames arrive in bursts: a 150-row burst can compress into a single
+        Syncer frame, so a build-count gate would never refresh the pane.
+        The timer fires ``stats_min_gap`` seconds after the last update and
+        stamps one stats payload, giving stop-and-go experiments the same
+        freshness as continuous flows.
+        """
+        if self._stats_settle_timer is not None:
+            return
+        timer = threading.Timer(self._stats_min_gap, self._flush_stats_snapshot)
+        timer.daemon = True
+        self._stats_settle_timer = timer
+        timer.start()
+
+    def _flush_stats_snapshot(self) -> None:
+        """Quiet-period consolidation: request one stats-bearing refresh."""
+        with self._lock:
+            if self._closed or not self._stats_bucket:
+                return
+            self._stats_settle_timer = None
+            if not self._syncer.has_panels():
+                return
+            self._stats_force = True
+        self._syncer.wake()
+
+    def _record_stats_locked(self, values: List[Any]) -> None:
+        """Fold one accepted record into the delay-bucket statistics.
+
+        The record was already appended to the CSV channel, so the stats pane
+        aggregates exactly the authoritative CSV data (never the display
+        window). Records without a usable numeric ``delay`` value are skipped.
+        """
+        if not self._stats_bucket:
+            return
+        try:
+            state_index = self._schema_names.index(self._stats_state_name)
+            delay_index = self._schema_names.index(self._stats_delay_name)
+        except ValueError:
+            return  # configured columns absent from this schema: skip quietly
+        delay_value = values[delay_index]
+        if isinstance(delay_value, bool) or not isinstance(
+            delay_value, (int, float)
+        ):
+            return
+        if isinstance(delay_value, float) and not math.isfinite(delay_value):
+            return
+        bucket_start = (
+            math.floor(delay_value) // self._stats_bucket
+        ) * self._stats_bucket
+        bucket = self._stats.get(bucket_start)
+        if bucket is None:
+            if len(self._stats) >= _MAX_STATS_BUCKETS:
+                self._coarsen_stats_locked()
+            bucket = self._stats.setdefault(bucket_start, [0, 0, 0])
+        bucket[0] += 1
+        state = str(values[state_index])
+        if state == self._stats_success:
+            bucket[1] += 1
+        elif state == self._stats_hang:
+            bucket[2] += 1
+
+    def _coarsen_stats_locked(self) -> None:
+        """Double the bucket width, pairwise-merging everything (cap guard).
+
+        Keeps the pane payload bounded even for pathological delay ranges;
+        the resulting width is reported inside the ``stats`` payload, so the
+        frontend relabels its bars in the same frame.
+        """
+        width = self._stats_bucket * 2
+        merged: Dict[int, List[int]] = {}
+        for key, bucket in self._stats.items():
+            target_key = (key // width) * width
+            target = merged.get(target_key)
+            if target is None:
+                merged[target_key] = bucket[:]
+            else:
+                for index in range(3):
+                    target[index] += bucket[index]
+        self._stats = merged
+        self._stats_bucket = width
+        if len(self._stats) >= _MAX_STATS_BUCKETS:
+            self._coarsen_stats_locked()  # hyper-sparse ranges: keep coarsening
 
     def _write_record_locked(self, kwargs: Dict[str, Any]) -> None:
         """Append one record to the CSV channel (authoritative, step 5)."""
@@ -807,8 +961,17 @@ class ViewWidget:
             return state, dict(self._counts[state])
         return None, {}
 
-    def _build_payload_locked(self, state_key: Any, depth: int) -> Dict[str, Any]:
-        """Snapshot payload per the frozen contract Section 4.3."""
+    def _build_payload_locked(
+        self, state_key: Any, depth: int, include_stats: bool = False
+    ) -> Dict[str, Any]:
+        """Snapshot payload per the frozen contract Section 4.3.
+
+        The optional ``stats`` block is additive (§4.3 semantics untouched):
+        when the stats pane is enabled it rides on every
+        ``stats_interval``-th build (and on the ``show()`` build itself, so
+        the first render already carries the pane), sparing the frontend
+        traffic in between.
+        """
         columns = [
             {"name": name, "type": _TYPE_NAMES.get(value_type, "str")}
             for name, value_type in zip(self._schema_names, self._schema_types)
@@ -823,7 +986,15 @@ class ViewWidget:
                 counts = dict(self._counts.get(state_key, {}))
         rows = self._ring_window_locked(depth)
         self._version += 1
-        return {
+        now = time.monotonic()
+        due = now - self._stats_last_attach >= self._stats_min_gap
+        attach_stats = self._stats_bucket > 0 and (
+            include_stats or self._stats_force or due
+        )
+        self._stats_force = False
+        if attach_stats:
+            self._stats_last_attach = now
+        payload: Dict[str, Any] = {
             "columns": columns,
             "state_key": state_value,
             "counts": counts,
@@ -831,6 +1002,26 @@ class ViewWidget:
             "total": self._rows_written,
             "window": len(rows),
             "version": self._version,
+        }
+        if attach_stats:
+            payload["stats"] = self._build_stats_snapshot_locked()
+            self._stats_since = 0
+        return payload
+
+    def _build_stats_snapshot_locked(self) -> Dict[str, Any]:
+        """Serializable delay-bucket snapshot for the optional stats pane."""
+        width = self._stats_bucket
+        buckets = [
+            [key, key + width, bucket[0], bucket[1], bucket[2]]
+            for key, bucket in sorted(self._stats.items())
+        ]
+        return {
+            "bucket": width,
+            "bars": self._stats_bars,
+            "success": self._stats_success,
+            "hang": self._stats_hang,
+            "rows": sum(bucket[2] for bucket in buckets),
+            "buckets": buckets,
         }
 
     def _build_live_snapshot(self) -> Optional[Dict[str, Any]]:

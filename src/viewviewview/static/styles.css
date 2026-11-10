@@ -66,6 +66,107 @@
   min-height: 0;
 }
 
+/* ---------------------------------------------------------------------
+ * Optional third pane: delay statistics, shown as a horizontal band that
+ * holds the detail pane (left) and the two bar charts (right).
+ * --------------------------------------------------------------------- */
+.vvv-band {
+  display: flex;
+  gap: 10px;
+  min-height: 0;
+}
+
+.vvv-band > .vvv-pane--detail {
+  flex: 1 1 auto;
+  min-width: 96px;
+}
+
+/* Fixed-width charts pane; node count is constant, only texts/widths patch. */
+.vvv-pane--stats {
+  display: flex;
+  flex: 0 0 272px;
+  flex-direction: column;
+  gap: 5px;
+  overflow: hidden;
+  padding: 8px 10px;
+}
+
+.vvv-stats-title {
+  align-items: baseline;
+  color: var(--vvv-fg);
+  display: flex;
+  font-size: 12px;
+  font-weight: 600;
+  justify-content: space-between;
+}
+
+.vvv-stats-title-value {
+  color: var(--vvv-fg-dim);
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.vvv-stats-body {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  gap: 3px;
+}
+
+.vvv-stat-row {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
+.vvv-stat-label {
+  color: var(--vvv-fg-dim);
+  flex: 0 0 80px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vvv-stat-track {
+  background: var(--vvv-header);
+  border-radius: 2px;
+  flex: 1 1 auto;
+  height: 10px;
+  overflow: hidden;
+}
+
+.vvv-stat-fill {
+  background: var(--vvv-count);
+  border-radius: 2px;
+  height: 100%;
+  width: 0%;
+}
+
+/* HANG率 bars share the warning red (palette has no red token yet). */
+.vvv-stat-fill--hang {
+  background: #e05252;
+}
+
+.vvv-stat-value {
+  color: var(--vvv-fg);
+  flex: 0 0 46px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.vvv-stats-divider {
+  border-top: 1px solid var(--vvv-border);
+}
+
+.vvv-stats-note {
+  color: var(--vvv-fg-dim);
+  font-size: 10px;
+}
+
 .vvv-table {
   border-collapse: collapse;
   font-variant-numeric: tabular-nums;

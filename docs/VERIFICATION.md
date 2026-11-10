@@ -121,6 +121,27 @@
 **修复**（`index.mjs: applyShiftedRows`）：用 `payload.total` 的增量算出本帧新增行数 K，逐格校验“新 rows[K..] == 旧 rows[0..]”后，改用一次 `DocumentFragment` 插入 K 行 + 从底部移除 K 行；校验不通过则回退原逐格 diff。`patchCountsTable` 同时改为原地更新文本。
 
 **正确性**：`scripts/mem_baseline.py` 新增逐格断言——渲染后的 DOM 必须与最后一份 payload 完全一致（3000 帧：0 处不一致）；JS 单帧耗时 4.07 ms → **0.21 ms**。套件 69 项全绿。
+
+## S5 Delay 统计面板（2026-11-10，v0.3.0）
+
+`ViewWidget(stats_bucket=100, ...)` 打开明细窗右侧的统计面板：delay 分桶（桶标签
+`2700-2800` 形式）、两幅柱状图（成功率 / HANG率）、按概率从高到低排列、固定高度节点池。
+
+**实现要点（全部满足“内存管理/防卡顿”约束）**：
+
+- 数据源 = CSV 本尊：每条被接受的记录在 `_record_stats_locked` 聚合（桶起值 →
+  `[总数, 成功数, HANG数]`），滚出显示窗口的旧行继续参与统计；
+- 前端节点池恒定：每图 `stats_bars` 个常驻行（label/track/fill/value），只在文字变化时
+  写 `textContent`、数值比较通过才写 `style.width`——不重排序、不重建；
+- 推送节流：`stats_interval` 控制“每 N 帧 payload 才携带 `stats` 块”（show() 首帧必带），
+  间隔帧 `stats` 缺席时前端沿用最近一次数据（`ctx.lastStats`），布局键不变、DOM 不动；
+- 桶数封顶 512：超限自动把桶宽 ×2 并两两合并（`_coarsen_stats_locked`），payload 用新桶宽；
+- 关闭（默认 `stats_bucket=0`）payload 无 `stats` 键，界面与 0.2.x 完全一致。
+
+**验收**：套件 89 项全绿（新增 20 个 stats 用例）；`scripts/mem_baseline.py` 默认开启
+stats 面板 3000 帧（depth=1000）：shadow 节点恒定 6178（drift 0）、mean 帧 0.38 ms、
+GC 后堆漂移 -0.2 MB、DOM 与 stats 图表逐条比对 0 处不一致；`stats=0` 跑法同样通过
+（节点恒定 1248、无面板）。
 7. Python 3.9 环境下 pip 会自动选择兼容的 anywidget 0.9.x（0.11+ 要求 Python ≥3.10）；本地实测环境为 Python 3.12 + anywidget 0.11，Python 3.9–3.12 的兼容性由 CI 矩阵持续验证。
 
 ## 后续建议

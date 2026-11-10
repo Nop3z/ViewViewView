@@ -9,12 +9,16 @@ the three S1 acceptance criteria (incremental rendering, see
 2. mean per-frame render time stays under ``MAX_FRAME_MS``;
 3. after a forced GC the used JS heap returns to within ``MAX_HEAP_DRIFT_MB``
    of the baseline sample (no unbounded growth).
+4. (stats on) the optional delay-statistics charts exist, keep a constant
+   node pool and their ranked bars equal the final payload snapshot.
+   Stats ride on every second build (interval-gate emulation).
 
 Usage::
 
-    python scripts/mem_baseline.py [frames] [interval_ms] [depth] [columns]
+    python scripts/mem_baseline.py [frames] [interval_ms] [depth] [columns] [stats]
 
-Defaults: 3000 frames, 50 ms interval (Syncer pace), depth 1000, 5 columns.
+Defaults: 3000 frames, 50 ms interval (Syncer pace), depth 1000, 5 columns,
+stats pane mode 1 (enabled).
 Requires ``playwright`` with a chromium-family browser installed.
 """
 
@@ -72,6 +76,7 @@ def main() -> int:
     interval_ms = int(sys.argv[2]) if len(sys.argv) > 2 else 50
     depth = int(sys.argv[3]) if len(sys.argv) > 3 else 1000
     columns = COLUMNS[: int(sys.argv[4])] if len(sys.argv) > 4 else COLUMNS
+    stats_mode = int(sys.argv[5]) == 1 if len(sys.argv) > 5 else True
 
     try:
         from playwright.sync_api import sync_playwright
@@ -110,7 +115,7 @@ def main() -> int:
 
         result = page.evaluate(
             """
-            async ([frames, interval, depth]) => {
+            async ([frames, interval, depth, statsMode]) => {
               const render = window.__vvvRender.render;
 
               const host = document.getElementById("host");
@@ -135,16 +140,47 @@ def main() -> int:
               };
 
               const seedRow = (n) => [
-                ["PASS", "FAIL", "TIMEOUT"][n % 3],
+                ["PASS", "FAIL", "TIMEOUT", "HANG"][n % 4],
                 100 + (n % 1900),
                 10 + (n % 40) + 0.5,
                 ["ok", "short", "open"][n % 3],
                 n % 9,
               ];
-              const makePayload = (n) => {
+
+              // CSV-rooted statistics mirror: every accepted row 1..n folds
+              // into one bucket slot [total, ok, hang] with a 100-wide delay
+              // bucket — exactly what the core does per accepted record.
+              const bucketAgg = new Map();
+              let statsRows = 0;
+              const ingestStat = (n) => {
+                const row = seedRow(n);
+                const lo = Math.floor(row[1] / 100) * 100;
+                let slot = bucketAgg.get(lo);
+                if (!slot) {
+                  slot = [0, 0, 0];
+                  bucketAgg.set(lo, slot);
+                }
+                slot[0] += 1;
+                if (row[0] === "PASS") slot[1] += 1;
+                if (row[0] === "HANG") slot[2] += 1;
+                statsRows = n;
+              };
+              const makeStats = () => ({
+                bucket: 100,
+                bars: 12,
+                success: "PASS",
+                hang: "HANG",
+                rows: statsRows,
+                buckets: Array.from(bucketAgg)
+                  .sort((a, b) => a[0] - b[0])
+                  .map(([lo, slot]) => [lo, lo + 100, slot[0], slot[1], slot[2]]),
+              });
+
+              const makePayload = (n, withStats) => {
+                for (let r = statsRows + 1; r <= n; r += 1) ingestStat(r);
                 const rows = [];
                 for (let i = 0; i < Math.min(depth, n); i += 1) rows.push(seedRow(n - i));
-                return {
+                const payload = {
                   columns,
                   state_key: "state",
                   counts: {
@@ -157,6 +193,10 @@ def main() -> int:
                   window: rows.length,
                   version: n,
                 };
+                // Interval-gate emulation: stats ride on every second build,
+                // and always on the first build and the final build.
+                if (withStats) payload.stats = makeStats();
+                return payload;
               };
 
               const countNodes = () => {
@@ -173,7 +213,7 @@ def main() -> int:
                 performance.memory ? performance.memory.usedJSHeapSize : 0;
 
               // ---- initial render ----
-              payload = makePayload(depth);
+              payload = makePayload(depth, statsMode);
               const teardown = render({ model, el });
 
               gc(); gc(); gc();
@@ -185,8 +225,12 @@ def main() -> int:
               let nodesMax = baseNodes;
               const t0 = performance.now();
 
-              for (let n = depth + 1; n <= depth + frames; n += 1) {
-                const next = makePayload(n);
+              const finalN = depth + frames;
+              for (let n = depth + 1; n <= finalN; n += 1) {
+                const withStats = statsMode
+                  ? (n - depth) % 2 === 0 || n === finalN
+                  : false;
+                const next = makePayload(n, withStats);
                 const tFrame = performance.now();
                 payload = next;
                 listeners.forEach((cb) => cb());
@@ -216,6 +260,89 @@ def main() -> int:
                   }
                 }
               }
+
+              // Correctness: the optional stats charts must equal the final
+              // snapshot, ranked rate-descending, and keep hiding the pool
+              // slots beyond the visible bars (no surplus/leak).
+              let statsMismatches = 0;
+              const statsSamples = [];
+              const finalStats = statsMode ? payload.stats || null : null;
+              if (statsMode && finalStats === null) {
+                statsMismatches += 1;
+                statsSamples.push(["final stats missing"]);
+              }
+              const pane = shadow.querySelector(".vvv-pane--stats");
+              if (statsMode && pane === null) {
+                statsMismatches += 1;
+                statsSamples.push(["stats pane missing"]);
+              } else if (!statsMode && pane !== null) {
+                statsMismatches += 1;
+                statsSamples.push(["unexpected stats pane"]);
+              }
+              if (statsMode && finalStats !== null && pane !== null) {
+                const bodies = pane.querySelectorAll(".vvv-stats-body");
+                if (bodies.length !== 2) {
+                  statsMismatches += 1;
+                  statsSamples.push(["chart bodies", bodies.length]);
+                }
+                const maxBars = finalStats.bars;
+                for (let chart = 0; chart < bodies.length; chart += 1) {
+                  const metric = chart === 0 ? 3 : 4; // [lo, hi, total, ok, hang]
+                  const entries = [];
+                  for (const b of finalStats.buckets) {
+                    if (b[2] > 0 && typeof b[metric] === "number" && b[metric] >= 0) {
+                      entries.push([b[0], b[1], Math.min(b[metric] / b[2], 1)]);
+                    }
+                  }
+                  entries.sort((a, b) => b[2] - a[2] || a[0] - b[0] || a[1] - b[1]);
+                  const ranked = entries.slice(0, maxBars);
+                  const rowsList = Array.from(bodies[chart].children);
+                  let visible = 0;
+                  rowsList.forEach((row, index) => {
+                    const want = index < ranked.length ? ranked[index] : null;
+                    if (row.style.display === "none") {
+                      if (want !== null) {
+                        statsMismatches += 1;
+                        statsSamples.push([chart, index, "hidden", want[0]]);
+                      }
+                      return;
+                    }
+                    visible += 1;
+                    if (want === null) {
+                      statsMismatches += 1;
+                      statsSamples.push([chart, index, "unexpected visible"]);
+                      return;
+                    }
+                    const label = `${want[0]}-${want[1]}`;
+                    const value = `${(want[2] * 100).toFixed(1)}%`;
+                    const labelText = row.children[0].textContent;
+                    const valueText = row.children[2].textContent;
+                    if (labelText !== label) {
+                      statsMismatches += 1;
+                      statsSamples.push([chart, index, "label", labelText, label]);
+                    }
+                    if (valueText !== value) {
+                      statsMismatches += 1;
+                      statsSamples.push([chart, index, "value", valueText, value]);
+                    }
+                    const gotWidth = parseFloat(row.children[1].firstChild.style.width);
+                    if (!(Math.abs(gotWidth - want[2] * 100) <= 0.006)) {
+                      statsMismatches += 1;
+                      statsSamples.push([
+                        chart,
+                        index,
+                        "width",
+                        row.children[1].firstChild.style.width,
+                        `${(want[2] * 100).toFixed(2)}%`,
+                      ]);
+                    }
+                  });
+                  if (visible !== ranked.length) {
+                    statsMismatches += 1;
+                    statsSamples.push([chart, "visible", visible, ranked.length]);
+                  }
+                }
+              }
               return {
                 frames,
                 baseNodes,
@@ -231,10 +358,12 @@ def main() -> int:
                 wallSeconds: (performance.now() - t0) / 1000,
                 domMismatches,
                 domSamples: samples,
+                statsMismatches,
+                statsSamples: statsSamples.slice(0, 5),
               };
             }
             """,
-            [frames, interval_ms, depth],
+            [frames, interval_ms, depth, 1 if stats_mode else 0],
         )
 
         browser.close()
@@ -244,7 +373,10 @@ def main() -> int:
     drift = result["heapDriftMB"]
     node_drift = result["nodesMax"] - result["nodesMin"]
 
-    print(f"frames={result['frames']} depth={depth} cols={len(columns)}")
+    print(
+        f"frames={result['frames']} depth={depth} cols={len(columns)} "
+        f"stats={'on' if stats_mode else 'off'}"
+    )
     print(
         "shadow nodes: "
         f"base={result['baseNodes']} min={result['nodesMin']} "
@@ -256,6 +388,7 @@ def main() -> int:
         f"drift={drift:+.1f}MB (budget {MAX_HEAP_DRIFT_MB}MB)"
     )
     print(f"dom mismatches: {result['domMismatches']}")
+    print(f"stats pane mismatches: {result['statsMismatches']}")
 
     failures = []
     if mean >= MAX_FRAME_MS:
@@ -268,6 +401,11 @@ def main() -> int:
         failures.append(
             f"DOM does not match payload: {result['domMismatches']} cells, "
             f"samples={result['domSamples']}"
+        )
+    if result["statsMismatches"]:
+        failures.append(
+            f"stats pane does not match payload: {result['statsMismatches']} bars, "
+            f"samples={result['statsSamples']}"
         )
 
     if failures:

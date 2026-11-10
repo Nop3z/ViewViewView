@@ -80,6 +80,8 @@ vt.show()       # 立即显示自定义字段的空表；注入开始后自动�
 # 长时间实验建议改用 vt.show(replace=True)：重跑 cell / 多次 show 时
 # 自动关闭上一个面板，避免浏览器端面板累积占内存；close() 会一并回收。
 # ViewWidget(frame_delay=0.1) 可放宽前端推送合帧间隔（默认 0.05 s）。
+# ViewWidget(stats_bucket=100) 可打开 delay 分桶统计图（成功率 / HANG率，
+#   按概率从高到低排列），详见下文「Delay 统计面板」。
 
 def attack():
     delay = random.randint(100, 2000)
@@ -150,6 +152,35 @@ vt = faultviz.ViewWidget(number_columns=["delay", "pulse", "voltage_mv"])
 
 传空列表则所有明细列都不使用绿色；`state`/`reply` 等字符串列始终为白色。
 
+### Delay 统计面板（可选，v0.3.0）
+
+`stats_bucket=` 打开明细窗右侧的统计面板：按 delay 分桶，实时显示两幅柱状图——
+**成功率**（命中 `stats_success` 状态的比例，默认 `PASS`）与 **HANG率**（默认 `HANG`），
+均按概率从高到低排列，桶标签如 `2700-2800`：
+
+```python
+vt = faultviz.ViewWidget(
+    live_rows=1000,
+    stats_bucket=100,      # 每桶 100（delay 0-100、100-200…，0=关闭）
+    stats_interval=5,      # 每 5 帧推送一次统计，降低前端开销
+    stats_bars=12,         # 每幅图最多 12 根柱（按概率高→低）
+    stats_success="PASS",  # 记为“成功”的状态值
+    stats_hang="HANG",     # 记为“HANG”的状态值
+    stats_state="state",   # 分类列名（需为 str 列）
+    stats_delay="delay",   # 分桶列名（需为数值列）
+)
+```
+
+行为说明：
+
+- **数据源是 CSV 本尊**：每条被接受的记录都会计入统计（与 `vt.rows_written` 一致），
+  滚出显示窗口的旧行不会被遗忘；
+- **省内存/防卡顿**：图表节点池固定（每图 `stats_bars` 个常驻节点，只改文字与条宽）；
+  统计按 `stats_interval` 节流推送，`_build_payload_locked` 里不会每帧重算排序；
+- delay 非数值（或 state/delay 列不存在）的记录自动跳过；
+- 极端 delay 范围下桶数封顶 512，超限自动把桶宽翻倍合并（payload 会带新的桶宽）；
+- 关闭时（默认 `stats_bucket=0`）payload 完全不含 `stats`，界面与旧版一致。
+
 ### CSV-only 记录（不打开界面）
 
 ```python
@@ -179,7 +210,7 @@ faultviz.csvplot(path)                                             # pygwalker �
 | FaultViz API | ViewViewView | 说明 |
 | --- | --- | --- |
 | `start_view_service(port=12345, max_heap="2g")` | ✅ 同签名 | no-op，无需 JVM；参数被接受且不会抛异常 |
-| `ViewWidget(csv_path=None, display_limit=None, flush_every=1, live_rows=None, fsync=False)` | ✅ 同签名 + 可选 `columns=` / `colors=` / `number_columns=` | 语义一致，含合法性校验错误文案；扩展参数均向后兼容 |
+| `ViewWidget(csv_path=None, display_limit=None, flush_every=1, live_rows=None, fsync=False)` | ✅ 同签名 + 可选 `columns=` / `colors=` / `number_columns=` / `frame_delay=` / `stats_bucket=` 等 | 语义一致，含合法性校验错误文案；扩展参数均向后兼容 |
 | `widget.update(**kwargs) -> bool` | ✅ | 首行定 schema；类型/键不匹配返回 `False`；CSV 写失败抛异常并锁死实例 |
 | `widget.show(state="state", limit=None, full=False)` | ✅ | 上窗分类计数 + 下窗明细；`limit=0` 仅显示统计；扩展参数 `replace=True` 显示新面板前关闭本 widget 的上一个面板（省内存，默认 `False` 保持 FaultViz 行为） |
 | `widget.plot(state="state", limit=None, full=False)` | ✅ | pygwalker 可用则交互绘图，否则降级 CSV 查看 |
