@@ -10,15 +10,17 @@ the three S1 acceptance criteria (incremental rendering, see
 3. after a forced GC the used JS heap returns to within ``MAX_HEAP_DRIFT_MB``
    of the baseline sample (no unbounded growth).
 4. (stats on) the optional delay-statistics charts exist, keep a constant
-   node pool and their ranked bars equal the final payload snapshot.
+   node pool and their timeline bars equal the final payload snapshot.
    Stats ride on every second build (interval-gate emulation).
+   Mode ``2`` additionally enables ``stats_custom=`` (third chart in the
+   right column with a 6th bucket counter).
 
 Usage::
 
     python scripts/mem_baseline.py [frames] [interval_ms] [depth] [columns] [stats]
 
 Defaults: 3000 frames, 50 ms interval (Syncer pace), depth 1000, 5 columns,
-stats pane mode 1 (enabled).
+stats pane mode 1 (enabled; 0 = off, 2 = on + stats_custom "FAIL").
 Requires ``playwright`` with a chromium-family browser installed.
 """
 
@@ -76,7 +78,7 @@ def main() -> int:
     interval_ms = int(sys.argv[2]) if len(sys.argv) > 2 else 50
     depth = int(sys.argv[3]) if len(sys.argv) > 3 else 1000
     columns = COLUMNS[: int(sys.argv[4])] if len(sys.argv) > 4 else COLUMNS
-    stats_mode = int(sys.argv[5]) == 1 if len(sys.argv) > 5 else True
+    stats_mode = int(sys.argv[5]) if len(sys.argv) > 5 else 1
 
     try:
         from playwright.sync_api import sync_playwright
@@ -116,6 +118,8 @@ def main() -> int:
         result = page.evaluate(
             """
             async ([frames, interval, depth, statsMode]) => {
+              // 0 = pane off, 1 = pane on, 2 = pane on + stats_custom "FAIL".
+              const extraMode = statsMode === 2;
               const render = window.__vvvRender.render;
 
               const host = document.getElementById("host");
@@ -141,15 +145,16 @@ def main() -> int:
 
               const seedRow = (n) => [
                 ["PASS", "FAIL", "TIMEOUT", "HANG"][n % 4],
-                100 + (n % 1900),
+                100 + (n % 3900),
                 10 + (n % 40) + 0.5,
                 ["ok", "short", "open"][n % 3],
                 n % 9,
               ];
 
               // CSV-rooted statistics mirror: every accepted row 1..n folds
-              // into one bucket slot [total, ok, hang] with a 100-wide delay
-              // bucket — exactly what the core does per accepted record.
+              // into one bucket slot — [total, ok, hang] (+ custom in mode 2,
+              // where FAIL is charted as the user-defined third state) —
+              // exactly what the core does per accepted record.
               const bucketAgg = new Map();
               let statsRows = 0;
               const ingestStat = (n) => {
@@ -157,23 +162,29 @@ def main() -> int:
                 const lo = Math.floor(row[1] / 100) * 100;
                 let slot = bucketAgg.get(lo);
                 if (!slot) {
-                  slot = [0, 0, 0];
+                  slot = extraMode ? [0, 0, 0, 0] : [0, 0, 0];
                   bucketAgg.set(lo, slot);
                 }
                 slot[0] += 1;
                 if (row[0] === "PASS") slot[1] += 1;
                 if (row[0] === "HANG") slot[2] += 1;
+                if (extraMode && row[0] === "FAIL") slot[3] += 1;
                 statsRows = n;
               };
               const makeStats = () => ({
                 bucket: 100,
-                bars: 12,
+                bars: 30,
                 success: "PASS",
                 hang: "HANG",
+                ...(extraMode ? { custom: "FAIL" } : {}),
                 rows: statsRows,
                 buckets: Array.from(bucketAgg)
                   .sort((a, b) => a[0] - b[0])
-                  .map(([lo, slot]) => [lo, lo + 100, slot[0], slot[1], slot[2]]),
+                  .map(([lo, slot]) =>
+                    extraMode
+                      ? [lo, lo + 100, slot[0], slot[1], slot[2], slot[3]]
+                      : [lo, lo + 100, slot[0], slot[1], slot[2]],
+                  ),
               });
 
               const makePayload = (n, withStats) => {
@@ -262,8 +273,9 @@ def main() -> int:
               }
 
               // Correctness: the optional stats charts must equal the final
-              // snapshot, ranked rate-descending, and keep hiding the pool
-              // slots beyond the visible bars (no surplus/leak).
+              // snapshot along the delay timeline (bucket start ascending,
+              // oldest end dropped beyond ``bars``); bars grow upward with a
+              // px height and exact numbers ride in the data-tip hover tag.
               let statsMismatches = 0;
               const statsSamples = [];
               const finalStats = statsMode ? payload.stats || null : null;
@@ -280,66 +292,91 @@ def main() -> int:
                 statsSamples.push(["unexpected stats pane"]);
               }
               if (statsMode && finalStats !== null && pane !== null) {
-                const bodies = pane.querySelectorAll(".vvv-stats-body");
-                if (bodies.length !== 2) {
+                const charts = pane.querySelectorAll(".vvv-stat-chart");
+                const wantCharts = extraMode ? 3 : 2;
+                if (charts.length !== wantCharts) {
                   statsMismatches += 1;
-                  statsSamples.push(["chart bodies", bodies.length]);
+                  statsSamples.push(["chart plots", charts.length]);
                 }
                 const maxBars = finalStats.bars;
-                for (let chart = 0; chart < bodies.length; chart += 1) {
-                  const metric = chart === 0 ? 3 : 4; // [lo, hi, total, ok, hang]
+                for (let chart = 0; chart < charts.length; chart += 1) {
+                  // chart order: 成功率, HANG率, then the optional custom one.
+                  // metric index into [lo, hi, total, ok, hang, custom]
+                  const metric = chart === 0 ? 3 : chart === 1 ? 4 : 5;
+                  const metricLabel =
+                    chart === 0 ? "成功" : chart === 1 ? "HANG" : "FAIL";
                   const entries = [];
                   for (const b of finalStats.buckets) {
-                    if (b[2] > 0 && typeof b[metric] === "number" && b[metric] >= 0) {
-                      entries.push([b[0], b[1], Math.min(b[metric] / b[2], 1)]);
+                    if (
+                      b[2] > 0 &&
+                      typeof b[metric] === "number" &&
+                      b[metric] >= 0
+                    ) {
+                      entries.push([
+                        b[0],
+                        b[1],
+                        b[2],
+                        b[metric],
+                        Math.min(b[metric] / b[2], 1),
+                      ]);
                     }
                   }
-                  entries.sort((a, b) => b[2] - a[2] || a[0] - b[0] || a[1] - b[1]);
-                  const ranked = entries.slice(0, maxBars);
-                  const rowsList = Array.from(bodies[chart].children);
-                  let visible = 0;
-                  rowsList.forEach((row, index) => {
-                    const want = index < ranked.length ? ranked[index] : null;
-                    if (row.style.display === "none") {
+                  entries.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+                  const visible = entries.slice(
+                    Math.max(0, entries.length - maxBars),
+                  );
+                  // 成功率/HANG率 use the shared 122px plot; the custom chart
+                  // stretches across a doubled 244px plot area.
+                  const plotPx = chart === 2 ? 244 : 122;
+                  const cols = Array.from(charts[chart].children).filter(
+                    (node) =>
+                      node.classList && node.classList.contains("vvv-stat-col"),
+                  );
+                  let shown = 0;
+                  cols.forEach((col, index) => {
+                    const want = index < visible.length ? visible[index] : null;
+                    if (col.style.display === "none") {
                       if (want !== null) {
                         statsMismatches += 1;
                         statsSamples.push([chart, index, "hidden", want[0]]);
                       }
                       return;
                     }
-                    visible += 1;
+                    shown += 1;
                     if (want === null) {
                       statsMismatches += 1;
                       statsSamples.push([chart, index, "unexpected visible"]);
                       return;
                     }
                     const label = `${want[0]}-${want[1]}`;
-                    const value = `${(want[2] * 100).toFixed(1)}%`;
-                    const labelText = row.children[0].textContent;
-                    const valueText = row.children[2].textContent;
+                    const cite = `${label} · ${metricLabel} ${want[3]}/${want[2]} · ${(
+                      want[4] * 100
+                    ).toFixed(1)}%`;
+                    const wantHeight = Math.max(Math.round(want[4] * plotPx), 0);
+                    const labelText = col.children[1].textContent;
                     if (labelText !== label) {
                       statsMismatches += 1;
                       statsSamples.push([chart, index, "label", labelText, label]);
                     }
-                    if (valueText !== value) {
+                    if (col.dataset.tip !== cite) {
                       statsMismatches += 1;
-                      statsSamples.push([chart, index, "value", valueText, value]);
+                      statsSamples.push([chart, index, "tip", col.dataset.tip, cite]);
                     }
-                    const gotWidth = parseFloat(row.children[1].firstChild.style.width);
-                    if (!(Math.abs(gotWidth - want[2] * 100) <= 0.006)) {
+                    const gotHeight = parseFloat(col.children[0].style.height);
+                    if (!(Math.abs(gotHeight - wantHeight) <= 0.006)) {
                       statsMismatches += 1;
                       statsSamples.push([
                         chart,
                         index,
-                        "width",
-                        row.children[1].firstChild.style.width,
-                        `${(want[2] * 100).toFixed(2)}%`,
+                        "height",
+                        col.children[0].style.height,
+                        `${wantHeight}px`,
                       ]);
                     }
                   });
-                  if (visible !== ranked.length) {
+                  if (shown !== visible.length) {
                     statsMismatches += 1;
-                    statsSamples.push([chart, "visible", visible, ranked.length]);
+                    statsSamples.push([chart, "shown", shown, visible.length]);
                   }
                 }
               }
@@ -363,7 +400,7 @@ def main() -> int:
               };
             }
             """,
-            [frames, interval_ms, depth, 1 if stats_mode else 0],
+            [frames, interval_ms, depth, stats_mode],
         )
 
         browser.close()
@@ -375,7 +412,7 @@ def main() -> int:
 
     print(
         f"frames={result['frames']} depth={depth} cols={len(columns)} "
-        f"stats={'on' if stats_mode else 'off'}"
+        f"stats={['off', 'on', 'on+custom'][stats_mode] if 0 <= stats_mode < 3 else stats_mode}"
     )
     print(
         "shadow nodes: "

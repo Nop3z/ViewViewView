@@ -122,27 +122,51 @@
 
 **正确性**：`scripts/mem_baseline.py` 新增逐格断言——渲染后的 DOM 必须与最后一份 payload 完全一致（3000 帧：0 处不一致）；JS 单帧耗时 4.07 ms → **0.21 ms**。套件 69 项全绿。
 
-## S5 Delay 统计面板（2026-11-10，v0.3.0）
+## S5 Delay 统计面板（2026-11-10，v0.3.0 / v0.3.1 竖直版）
 
 `ViewWidget(stats_bucket=100, ...)` 打开明细窗右侧的统计面板：delay 分桶（桶标签
-`2700-2800` 形式）、两幅柱状图（成功率 / HANG率）、按概率从高到低排列、固定高度节点池。
+`500-600` 形式）、两幅竖直柱状图（成功率 / HANG率）、横轴按 delay 时间轴左→右递增
+（安全保护：超出 `stats_bars` 时从最旧一端截断，最新时间轴始终可见）、固定高度节点池；
+柱内不放数字，精确值走原生 title 悬停提示（`2700-2800 · HANG 5/6 · 83.3%`）。
 
 **实现要点（全部满足“内存管理/防卡顿”约束）**：
 
 - 数据源 = CSV 本尊：每条被接受的记录在 `_record_stats_locked` 聚合（桶起值 →
   `[总数, 成功数, HANG数]`），滚出显示窗口的旧行继续参与统计；
-- 前端节点池恒定：每图 `stats_bars` 个常驻行（label/track/fill/value），只在文字变化时
-  写 `textContent`、数值比较通过才写 `style.width`——不重排序、不重建；
+- 前端节点池恒定：每图 `stats_bars` 个常驻列（fill/label），只在文字/提示变化时
+  写 `textContent`/`title`、数值比较通过才写 `style.height`（px 柱高，自下向上
+  生长）——不重排序、不重建；
 - 推送节流：`stats_interval` 控制“每 N 帧 payload 才携带 `stats` 块”（show() 首帧必带），
   间隔帧 `stats` 缺席时前端沿用最近一次数据（`ctx.lastStats`），布局键不变、DOM 不动；
 - 桶数封顶 512：超限自动把桶宽 ×2 并两两合并（`_coarsen_stats_locked`），payload 用新桶宽；
 - 关闭（默认 `stats_bucket=0`）payload 无 `stats` 键，界面与 0.2.x 完全一致。
 
-**验收**：套件 89 项全绿（新增 20 个 stats 用例）；`scripts/mem_baseline.py` 默认开启
-stats 面板 3000 帧（depth=1000）：shadow 节点恒定 6178（drift 0）、mean 帧 0.38 ms、
-GC 后堆漂移 -0.2 MB、DOM 与 stats 图表逐条比对 0 处不一致；`stats=0` 跑法同样通过
-（节点恒定 1248、无面板）。
+**验收**：套件 98 项全绿（22 个 stats 用例 + 自定义/悬停用例）；`scripts/mem_baseline.py`
+默认开启 stats 面板（depth=1000，39 桶 > 30 柱、覆盖截断路径）：shadow 节点恒定
+当前构建实测 6245（mode 1，两图 + 悬停浮层，drift 0）/ 6341（mode 2，三图，drift 0）、
+mean 帧 0.4-0.5 ms、GC 后堆漂移 -0.3 MB、DOM 与竖柱时间轴逐条比对 0 处不一致
+（含 label/悬停文本/px 高度/隐藏池）；`stats=0` 跑法同样通过（节点恒定 6048、无面板）。
 7. Python 3.9 环境下 pip 会自动选择兼容的 anywidget 0.9.x（0.11+ 要求 Python ≥3.10）；本地实测环境为 Python 3.12 + anywidget 0.11，Python 3.9–3.12 的兼容性由 CI 矩阵持续验证。
+
+**v0.5.0 增补（同一 S5 面板）**：新增 `stats_custom=`（用户自定义第三状态图，
+用法同 `stats_success`/`stats_hang`）——设置后 payload 桶行带第 6 个计数、快照多一个
+`custom` 键（仅 opt-in 时，未设置 payload 逐字节不变）；图表布局改为 2×2“象限”：
+成功率（左上）/ HANG率（左下）同左列，自定义图表（用户指定的 #18097d 提亮为
+#4d33ff；绘图区拉长一倍、贴底与 HANG率 齐平）独占右侧整列，三图靠拢比纵向堆叠省眼力。mem_baseline 新增 stats 模式 2
+（400 帧、三图：节点恒定 6341——含悬停浮层节点、DOM 与 6 槽快照逐条比对 0 差异）；
+套件 98 项全绿。
+
+**v0.5.1 增补（同一 S5 面板）**：悬停任意柱条**即时**显示精确值浮层
+（`500-600 · HANG 12/15 · 80.0%` 式）：每 pane 一个常驻浮层节点 + 两个委托监听，
+只在鼠标事件时定位/显隐，实时分帧零参与（400 帧内存基线照旧 drift 0）；
+精确值载体由原生 `title`（停留约 1 s 才出现）改为 `data-tip` + `aria-label`。
+
+**v0.4.0 增补（同一 S5 面板）**：统计面板**默认开启**（`stats_bucket` 默认 100，
+`stats_bucket=0` 显式关闭并回到 FaultViz 原观感）——这是默认行为变更；针对迁移
+用户的列名不一致场景，`show()` 在“面板开着但 state/delay 列不在 schema”时输出
+一行 INFO 引导改 `stats_state=`/`stats_delay=`。界面侧统计面板右缘留 32px 边距
+（16:9 全屏浏览器下不再贴屏幕边缘）。套件 92 项全绿（新增“默认开启 / 显式关闭
+payload 一致”两用例）。
 
 ## 后续建议
 

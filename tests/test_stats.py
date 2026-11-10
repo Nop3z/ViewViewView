@@ -1,8 +1,9 @@
-"""Optional delay-statistics pane: core accumulation + payload attach.
+"""Delay-statistics pane: core accumulation + payload attach.
 
-The stats block is additive to the frozen §4.3 payload: ``stats_bucket=0``
-(default) must leave every payload exactly as before, while an enabled pane
-aggregates every accepted CSV record (not the display window).
+The stats block is additive to the frozen §4.3 payload: since v0.4.0 the
+pane is on by default (bucket width 100), and **``stats_bucket=0`` must
+leave every payload exactly as before** (the pre-0.4.0 default), while an
+enabled pane aggregates every accepted CSV record (not the display window).
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ def snapshot(widget: ViewWidget, include_stats: bool = False, depth: int = 5):
         )
 
 
-def test_stats_disabled_by_default(tmp_path, monkeypatch):
+def test_stats_enabled_by_default(tmp_path, monkeypatch):
     import viewviewview.core as core
 
     captured = {}
@@ -34,6 +35,27 @@ def test_stats_disabled_by_default(tmp_path, monkeypatch):
         ),
     )
     widget = ViewWidget(csv_path=str(tmp_path / "a.csv"))
+    for index in range(4):
+        widget.update(state="PASS" if index % 2 else "FAIL", delay=index)
+    widget.show()
+    stats = captured["payload"]["stats"]
+    assert stats["bucket"] == 100
+    assert stats["rows"] == 4
+    widget.close()
+
+
+def test_stats_bucket_zero_keeps_payload_without_stats(tmp_path, monkeypatch):
+    import viewviewview.core as core
+
+    captured = {}
+    monkeypatch.setattr(
+        core,
+        "render_payload",
+        lambda payload, colors=None, number_columns=None, on_created=None: captured.update(
+            {"payload": payload}
+        ),
+    )
+    widget = ViewWidget(csv_path=str(tmp_path / "a.csv"), stats_bucket=0)
     for index in range(4):
         widget.update(state="PASS" if index % 2 else "FAIL", delay=index)
     widget.show()
@@ -60,7 +82,7 @@ def test_show_includes_stats_when_enabled(tmp_path, monkeypatch):
     widget.show()
     stats = captured["payload"]["stats"]
     assert stats["bucket"] == 100
-    assert stats["bars"] == 12
+    assert stats["bars"] == 30
     assert stats["success"] == "PASS"
     assert stats["hang"] == "HANG"
     assert stats["buckets"] == [[2700, 2800, 2, 1, 1]]
@@ -251,6 +273,67 @@ def test_stats_bucket_count_is_capped_by_coarsening(tmp_path):
     widget.close()
 
 
+def test_stats_custom_adds_custom_counter_and_payload_key(tmp_path):
+    """stats_custom= rides an additive 6th slot + payload key (opt-in only)."""
+    widget = ViewWidget(csv_path=str(tmp_path / "a.csv"), stats_custom="FAIL")
+    widget.update(state="PASS", delay=150)
+    widget.update(state="FAIL", delay=155)
+    widget.update(state="HANG", delay=160)
+    widget.update(state="FAIL", delay=980)
+    stats = snapshot(widget, include_stats=True)["stats"]
+    assert stats["custom"] == "FAIL"
+    assert stats["buckets"] == [
+        [100, 200, 3, 1, 1, 1],
+        [900, 1000, 1, 0, 0, 1],
+    ]
+    widget.close()
+
+
+def test_stats_custom_absent_from_default_payload(tmp_path):
+    widget = ViewWidget(csv_path=str(tmp_path / "a.csv"))
+    widget.update(state="FAIL", delay=150)
+    stats = snapshot(widget, include_stats=True)["stats"]
+    assert "custom" not in stats
+    for bucket in stats["buckets"]:
+        assert len(bucket) == 5
+    widget.close()
+
+
+def test_stats_custom_mirrors_already_charted_value(tmp_path):
+    """stats_custom= equal to success/hang counts independently, not zero."""
+    widget = ViewWidget(
+        csv_path=str(tmp_path / "a.csv"),
+        stats_success="PASS",
+        stats_custom="PASS",
+    )
+    widget.update(state="PASS", delay=10)
+    stats = snapshot(widget, include_stats=True)["stats"]
+    assert stats["buckets"] == [[0, 100, 1, 1, 0, 1]]
+    widget.close()
+
+
+def test_stats_custom_survives_coarsening(tmp_path):
+    widget = ViewWidget(
+        csv_path=str(tmp_path / "a.csv"),
+        stats_bucket=1,
+        stats_custom="FAIL",
+        live_rows=10,
+        flush_every=1000,
+    )
+    for delay in range(600):
+        widget.update(state="HANG" if delay % 2 else "FAIL", delay=delay)
+    stats = snapshot(widget, include_stats=True, depth=1)["stats"]
+    assert stats["bucket"] > 1
+    for bucket in stats["buckets"]:
+        assert len(bucket) == 6
+        # rows: [lo, hi, total, ok, hang, custom]; here ok == 0 and every
+        # record is FAIL (custom) or HANG, so total = hang + custom.
+        assert bucket[3] == 0
+        assert bucket[2] == bucket[4] + bucket[5]
+    assert sum(bucket[5] for bucket in stats["buckets"]) == 300
+    widget.close()
+
+
 _BUCKET_MESSAGE = (
     "stats_bucket must be a non-negative integer (0 disables the stats pane)"
 )
@@ -270,6 +353,14 @@ _BUCKET_MESSAGE = (
         ({"stats_delay": ""}, "stats_delay must be a non-empty string"),
         ({"stats_success": ""}, "stats_success must be a non-empty string"),
         ({"stats_hang": ""}, "stats_hang must be a non-empty string"),
+        (
+            {"stats_custom": 123},
+            "stats_custom must be a string (an empty string disables the chart)",
+        ),
+        (
+            {"stats_custom": None},
+            "stats_custom must be a string (an empty string disables the chart)",
+        ),
     ],
 )
 def test_stats_validation(kwargs, message, tmp_path):

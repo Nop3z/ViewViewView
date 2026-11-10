@@ -424,24 +424,31 @@ function readStats(payload) {
     : null;
 }
 
-/** @returns {number} Bars per chart (1..50, default 12), defensively clamped. */
+/** @returns {number} Bars per chart (1..50, default 30), defensively clamped. */
 function readBars(stats) {
-  const value = stats && typeof stats.bars === "number" ? stats.bars : 12;
+  const value = stats && typeof stats.bars === "number" ? stats.bars : 30;
   return Math.min(50, Math.max(1, Math.floor(value)));
 }
 
+/** @returns {string} User-defined third state value ("" = no custom chart). */
+function readCustom(stats) {
+  return stats && typeof stats.custom === "string" ? stats.custom : "";
+}
+
 /**
- * Sig of the stats-pane config only (bucket width / bar count / labels). A
- * change forces one full rebuild; data-only changes patch in place.
+ * Sig of the stats-pane config only (bucket width / bar count / labels /
+ * custom third state). A change forces one full rebuild; data-only changes
+ * patch in place.
  * @returns {string}
  */
 function statsKey(stats) {
   if (stats === null) {
     return "";
   }
-  return `${readBars(stats)};${toCount(stats.bucket, "-")};${toDisplayText(
-    stats.success,
-  )};${toDisplayText(stats.hang)}`;
+  return `${readBars(stats)};${readCustom(stats)};${toCount(
+    stats.bucket,
+    "-",
+  )};${toDisplayText(stats.success)};${toDisplayText(stats.hang)}`;
 }
 
 /**
@@ -502,43 +509,114 @@ function buildDetailPane(columns, rows, ctx) {
 }
 
 /**
- * Optional third pane (right of the detail pane): two delay-bucket bar
- * charts — 成功率 by ``stats.success`` and HANG率 by ``stats.hang``, both
- * ranked highest-probability first. Node count is constant: ``bars`` rows
- * per chart are created once here and then only label/value texts and bar
- * widths are patched, so live frames never rebuild the pane.
+ * Hover tag: one shared floating element per stats pane. Moving the pointer
+ * over any visible bar instantly prints its exact numbers above the bar top
+ * (``data-tip`` written by :func:`updateStatChart`); leaving the pane hides
+ * it. Node cost is a single constant element; the two delegated listeners
+ * only run on hover, never during live frame patches.
+ * @param {HTMLElement} pane the ``.vvv-pane--stats`` section (positioned).
+ * @returns {void}
+ */
+function attachStatsHoverTag(pane) {
+  const tip = document.createElement("div");
+  tip.className = "vvv-stats-tip";
+  pane.appendChild(tip);
+  const hideTag = () => {
+    if (tip.style.display !== "none") {
+      tip.style.display = "none";
+    }
+  };
+  pane.addEventListener("mouseleave", hideTag);
+  pane.addEventListener("mouseover", (event) => {
+    const source = event.target;
+    const col =
+      source && typeof source.closest === "function"
+        ? source.closest("div.vvv-stat-col")
+        : null;
+    const text = col && col.style.display !== "none" ? col.dataset.tip : "";
+    if (!text) {
+      hideTag();
+      return;
+    }
+    const paneBox = pane.getBoundingClientRect();
+    const colBox = col.getBoundingClientRect();
+    if (tip.textContent !== text) {
+      tip.textContent = text;
+    }
+    tip.style.left = `${colBox.left + colBox.width / 2 - paneBox.left}px`;
+    tip.style.top = `${colBox.top - paneBox.top - 4}px`;
+    if (tip.style.display !== "block") {
+      tip.style.display = "block";
+    }
+  });
+}
+
+/**
+ * Optional third pane (right of the detail pane): vertical delay-bucket bar
+ * charts arranged like quadrants — 成功率 (top-left) and HANG率 (bottom-left)
+ * share the left column, while an optional user-defined state chart via
+ * ``stats_custom=`` owns the right column (first + fourth quadrant), so the
+ * three plots stay close together instead of splitting far apart. The x axis
+ * runs along the delay timeline (bucket start ascending), so anomalies stand
+ * out against their left/right neighbours; bars grow upward from a shared
+ * baseline. Node count is constant: ``bars`` columns per chart are created
+ * once here and then only label texts/tooltips/bar heights are patched, so
+ * live frames never rebuild the pane. The custom chart anchors to the pane
+ * bottom (flush with HANG率) and stretches across a doubled plot area.
  * @returns {{ pane: HTMLElement, handles: object }}
  */
 function buildStatsPane(stats) {
   const pane = document.createElement("section");
   pane.className = "vvv-pane vvv-pane--stats";
   const bars = readBars(stats);
-  const successChart = buildStatChart(
-    "成功率",
-    stats && typeof stats.success === "string" ? stats.success : "",
-    bars,
-    "",
-  );
-  const hangChart = buildStatChart(
-    "HANG率",
-    stats && typeof stats.hang === "string" ? stats.hang : "",
-    bars,
-    "vvv-stat-fill--hang",
-  );
-  pane.appendChild(successChart.head);
-  pane.appendChild(successChart.body);
-  const divider = document.createElement("div");
-  divider.className = "vvv-stats-divider";
-  pane.appendChild(divider);
-  pane.appendChild(hangChart.head);
-  pane.appendChild(hangChart.body);
+  const custom = readCustom(stats);
+  const successValue =
+    stats && typeof stats.success === "string" ? stats.success : "";
+  const hangValue = stats && typeof stats.hang === "string" ? stats.hang : "";
+  const successChart = buildStatChart("成功率", successValue, bars, "");
+  const hangChart = buildStatChart("HANG率", hangValue, bars, "vvv-stat-fill--hang");
+  const layout = document.createElement("div");
+  layout.className = "vvv-stats-layout";
+  const successBlock = document.createElement("div");
+  successBlock.className = "vvv-stat-block vvv-stat-block--q2";
+  successBlock.appendChild(successChart.head);
+  successBlock.appendChild(successChart.chart);
+  const hangBlock = document.createElement("div");
+  hangBlock.className = "vvv-stat-block vvv-stat-block--q3";
+  hangBlock.appendChild(hangChart.head);
+  hangBlock.appendChild(hangChart.chart);
+  layout.appendChild(successBlock);
+  layout.appendChild(hangBlock);
+  let customChart = null;
+  if (custom !== "") {
+    pane.classList.add("vvv-pane--stats-custom");
+    customChart = buildStatChart(
+      `${custom}率`,
+      custom,
+      bars,
+      "vvv-stat-fill--custom",
+      STAT_PLOT_CUSTOM_PX,
+    );
+    const customBlock = document.createElement("div");
+    customBlock.className = "vvv-stat-block vvv-stat-block--custom";
+    customBlock.appendChild(customChart.head);
+    customBlock.appendChild(customChart.chart);
+    layout.appendChild(customBlock);
+  }
+  pane.appendChild(layout);
   const note = document.createElement("div");
   note.className = "vvv-stats-note";
   pane.appendChild(note);
+  attachStatsHoverTag(pane);
   const handles = {
     note,
     bars,
-    rows: { success: successChart.rows, hang: hangChart.rows },
+    custom,
+    cols: {
+      success: successChart.cols,
+      hang: hangChart.cols,
+      custom: customChart ? customChart.cols : null,
+    },
   };
   patchStatsPane(handles, stats);
   return { pane, handles };
@@ -546,10 +624,16 @@ function buildStatsPane(stats) {
 
 /**
  * One chart block: header (`title` + matched state value) plus a fixed pool
- * of `bars` hidden rows; hidden until the first data arrives.
- * @returns {{ head: HTMLElement, body: HTMLElement, rows: HTMLElement[], fill: HTMLElement }}
+ * of ``bars`` columns (fill + rotated label), hidden until data arrives.
+ * Plot-area heights are hard-coded in sync with styles.css
+ * (STAT_PLOT_PX + STAT_LABEL_PX == the default .vvv-stat-chart height);
+ * a non-default ``plotPx`` (the stretched custom chart) is written inline,
+ * which also moves its 50% gridline. The x axis runs along the delay
+ * timeline (bucket start ascending); anomalies stand out against their
+ * neighbours and bars grow upward from a shared baseline.
+ * @returns {{ head: HTMLElement, chart: HTMLElement, cols: HTMLElement[] }}
  */
-function buildStatChart(title, stateLabel, bars, fillClass) {
+function buildStatChart(title, stateLabel, bars, fillClass, plotPx = STAT_PLOT_PX) {
   const head = document.createElement("div");
   head.className = "vvv-stats-title";
   head.textContent = title;
@@ -557,35 +641,40 @@ function buildStatChart(title, stateLabel, bars, fillClass) {
   value.className = "vvv-stats-title-value";
   value.textContent = stateLabel ?? "";
   head.appendChild(value);
-  const body = document.createElement("div");
-  body.className = "vvv-stats-body";
-  const rows = [];
-  for (let index = 0; index < bars; index += 1) {
-    const row = document.createElement("div");
-    row.className = "vvv-stat-row";
-    row.style.display = "none";
-    const label = document.createElement("span");
-    label.className = "vvv-stat-label";
-    const track = document.createElement("div");
-    track.className = "vvv-stat-track";
-    const barFill = document.createElement("div");
-    barFill.className = `vvv-stat-fill${fillClass ? ` ${fillClass}` : ""}`;
-    track.appendChild(barFill);
-    const valueText = document.createElement("span");
-    valueText.className = "vvv-stat-value";
-    row.appendChild(label);
-    row.appendChild(track);
-    row.appendChild(valueText);
-    body.appendChild(row);
-    rows.push(row);
+  const chart = document.createElement("div");
+  chart.className = "vvv-stat-chart";
+  const grid = document.createElement("div");
+  grid.className = "vvv-stat-grid";
+  if (plotPx !== STAT_PLOT_PX) {
+    chart.style.height = `${plotPx + STAT_LABEL_PX}px`;
+    grid.style.bottom = `${STAT_LABEL_PX + plotPx / 2}px`;
   }
-  return { head, body, rows };
+  chart.appendChild(grid);
+  const baseline = document.createElement("div");
+  baseline.className = "vvv-stat-baseline";
+  chart.appendChild(baseline);
+  const cols = [];
+  for (let index = 0; index < bars; index += 1) {
+    const col = document.createElement("div");
+    col.className = "vvv-stat-col";
+    col.style.display = "none";
+    const fill = document.createElement("div");
+    fill.className = `vvv-stat-fill${fillClass ? ` ${fillClass}` : ""}`;
+    const label = document.createElement("div");
+    label.className = "vvv-stat-lab";
+    col.appendChild(fill);
+    col.appendChild(label);
+    chart.appendChild(col);
+    cols.push(col);
+  }
+  return { head, chart, cols };
 }
 
 /**
  * Patch both charts from one stats snapshot (already defensively shaped).
- * Buckets without any record hide; visible rows are the highest-probability
- * ranking (rate descending, ties by bucket start ascending).
+ * Columns run along the delay timeline (bucket start ascending); buckets
+ * beyond ``maxBars`` are dropped from the oldest end, so the latest always
+ * stays visible.
  * @returns {void}
  */
 function patchStatsPane(handles, stats) {
@@ -593,20 +682,50 @@ function patchStatsPane(handles, stats) {
     return;
   }
   const buckets = Array.isArray(stats.buckets) ? stats.buckets : [];
-  updateStatChart(handles.rows.success, buckets, handles.bars, 3);
-  updateStatChart(handles.rows.hang, buckets, handles.bars, 4);
+  updateStatChart(handles.cols.success, buckets, handles.bars, 3, "成功");
+  updateStatChart(handles.cols.hang, buckets, handles.bars, 4, "HANG");
+  if (handles.cols.custom !== null && handles.custom !== "") {
+    updateStatChart(
+      handles.cols.custom,
+      buckets,
+      handles.bars,
+      5,
+      handles.custom,
+      STAT_PLOT_CUSTOM_PX,
+    );
+  }
   const note = `单位 ${toCount(stats.bucket, "-")} · 共 ${toCount(stats.rows, "0")} 行已统计`;
   if (handles.note.textContent !== note) {
     handles.note.textContent = note;
   }
 }
 
+/** Plot-area height in px (sync with styles.css .vvv-stat-chart). */
+const STAT_PLOT_PX = 122;
+
+/** Rotated timeline-label zone height in px (sync with styles.css). */
+const STAT_LABEL_PX = 84;
+
 /**
- * Align one chart's fixed row pool to the ranked view of ``buckets``:
- * only changed texts/bar widths are written (no DOM nodes are created).
+ * Custom-chart plot height: the right column owns twice the rows, so its
+ * bars stretch across a doubled plot area — user-defined states (often the
+ * majority) spread along the whole timeline deserve the resolution.
+ * @type {number}
+ */
+const STAT_PLOT_CUSTOM_PX = STAT_PLOT_PX * 2;
+
+/**
+ * Align one chart's fixed column pool to the timeline view of ``buckets``:
+ * only changed texts/heights are written (no DOM nodes are created), and
+ * exact numbers ride in the ``data-tip`` attribute, which the pane-level
+ * hover tag prints above a column the moment the pointer enters it (the
+ * native ``title`` delay is too slow to be seen while scanning bars).
+ * Height uses px units, so no percentage-normalization concerns apply here.
+ * @param {number} [plotPx] plot height for this chart (px); defaults to the
+ *   shared STAT_PLOT_PX, the custom chart passes STAT_PLOT_CUSTOM_PX.
  * @returns {void}
  */
-function updateStatChart(rows, buckets, maxBars, metricIndex) {
+function updateStatChart(cols, buckets, maxBars, metricIndex, metricLabel, plotPx = STAT_PLOT_PX) {
   const entries = [];
   for (const bucket of buckets) {
     if (!Array.isArray(bucket) || bucket.length < 5) {
@@ -625,39 +744,42 @@ function updateStatChart(rows, buckets, maxBars, metricIndex) {
     entries.push({
       lo: bucket[0],
       hi: bucket[1],
+      total,
+      hits,
       rate: Math.min(hits / total, 1),
     });
   }
-  entries.sort((a, b) => b.rate - a.rate || a.lo - b.lo || a.hi - b.hi);
-  for (let index = 0; index < rows.length; index += 1) {
-    const row = rows[index];
-    const entry = index < entries.length ? entries[index] : null;
+  entries.sort((a, b) => a.lo - b.lo || a.hi - b.hi);
+  const visible = entries.slice(Math.max(0, entries.length - maxBars));
+  for (let index = 0; index < cols.length; index += 1) {
+    const col = cols[index];
+    const entry = index < visible.length ? visible[index] : null;
     if (entry === null) {
-      if (row.style.display !== "none") {
-        row.style.display = "none";
+      if (col.style.display !== "none") {
+        col.style.display = "none";
       }
       continue;
     }
-    if (row.style.display !== "") {
-      row.style.display = "";
+    if (col.style.display !== "") {
+      col.style.display = "";
     }
     const label = `${toCount(entry.lo, "?")}-${toCount(entry.hi, "?")}`;
-    const value = `${(entry.rate * 100).toFixed(1)}%`;
-    const widthValue = entry.rate * 100;
-    const labelEl = row.children[0];
-    const valueEl = row.children[2];
-    const fillEl = row.children[1].firstChild;
+    const title = `${label} · ${metricLabel} ${entry.hits}/${entry.total} · ${(
+      entry.rate * 100
+    ).toFixed(1)}%`;
+    const height = Math.max(Math.round(entry.rate * plotPx), 0);
+    const fillEl = col.children[0];
+    const labelEl = col.children[1];
     if (labelEl.textContent !== label) {
       labelEl.textContent = label;
     }
-    if (valueEl.textContent !== value) {
-      valueEl.textContent = value;
+    if (col.dataset.tip !== title) {
+      col.dataset.tip = title;
+      col.setAttribute("aria-label", title);
     }
-    // The browser normalizes e.g. "25.00%" to "25%", so compare numerically
-    // and skip the write when the stored width already rounds the same.
-    const storedWidth = parseFloat(fillEl.style.width);
-    if (!(Math.abs(storedWidth - widthValue) <= 0.005)) {
-      fillEl.style.width = `${widthValue.toFixed(2)}%`;
+    const storedHeight = parseFloat(fillEl.style.height);
+    if (!(Math.abs(storedHeight - height) <= 0.005)) {
+      fillEl.style.height = `${height}px`;
     }
   }
 }

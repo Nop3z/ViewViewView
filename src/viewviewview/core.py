@@ -188,6 +188,14 @@ def _validate_stats_bars(stats_bars: Any) -> None:
         raise ValueError("stats_bars must be an integer between 1 and 50")
 
 
+def _validate_stats_custom(stats_custom: Any) -> None:
+    """User-defined third state value (stats_custom=); "" disables the chart."""
+    if type(stats_custom) is not str:
+        raise ValueError(
+            "stats_custom must be a string (an empty string disables the chart)"
+        )
+
+
 def _validate_stats_name(name: Any, argname: str) -> None:
     if not isinstance(name, str) or not name:
         raise ValueError(f"{argname} must be a non-empty string")
@@ -412,13 +420,14 @@ class ViewWidget:
         colors: Optional[Mapping[str, str]] = None,
         number_columns: Optional[Sequence[str]] = None,
         frame_delay: Optional[float] = None,
-        stats_bucket: int = 0,
+        stats_bucket: int = 100,
         stats_interval: int = 5,
-        stats_bars: int = 12,
+        stats_bars: int = 30,
         stats_state: str = "state",
         stats_delay: str = "delay",
         stats_success: str = "PASS",
         stats_hang: str = "HANG",
+        stats_custom: str = "",
     ) -> None:
         _validate_limit(display_limit)
         _validate_limit(live_rows)
@@ -431,6 +440,7 @@ class ViewWidget:
         _validate_stats_name(stats_delay, "stats_delay")
         _validate_stats_name(stats_success, "stats_success")
         _validate_stats_name(stats_hang, "stats_hang")
+        _validate_stats_custom(stats_custom)
         if columns is None:
             schema_names: List[str] = []
             schema_types: List[Optional[type]] = []
@@ -481,7 +491,8 @@ class ViewWidget:
         self._selected_depth: Optional[int] = None
         self._shown_panel: Any = None
 
-        # Optional delay-statistics pane (stats_bucket=0 disables everything).
+        # Delay-statistics pane, ON by default (bucket width 100 in the
+        # delay column's unit); ``stats_bucket=0`` disables everything.
         # ``_stats`` mirrors every accepted CSV record: bucket start -> [total,
         # success, hang]. Rows rotated out of the live window keep counting,
         # so the pane aggregates the CSV channel, not the display window.
@@ -495,6 +506,7 @@ class ViewWidget:
         self._stats_delay_name: str = stats_delay
         self._stats_success: str = stats_success
         self._stats_hang: str = stats_hang
+        self._stats_custom: str = stats_custom
         self._stats: Dict[int, List[int]] = {}
         self._stats_min_gap: float = stats_interval * (
             _FRAME_DELAY if frame_delay is None else _validate_frame_delay(frame_delay)
@@ -641,6 +653,31 @@ class ViewWidget:
     # ------------------------------------------------------------------
     # Display
     # ------------------------------------------------------------------
+    def _warn_stats_columns_locked(self) -> None:
+        """One-line INFO when the stats pane is on but its columns are absent.
+
+        The pane is on by default (v0.4.0), so a CSV whose state/delay columns
+        carry different names would otherwise just show two empty charts;
+        users only need to re-point ``stats_state=`` / ``stats_delay=``.
+        """
+        if not self._stats_bucket or not self._schema_names:
+            return
+        missing = [
+            name
+            for name, key in (
+                (self._stats_state_name, "state"),
+                (self._stats_delay_name, "delay"),
+            )
+            if name not in self._schema_names
+        ]
+        if missing:
+            _LOGGER.info(
+                "stats pane is on but %s not in declared columns — charts stay "
+                "empty until stats_state=/stats_delay= point at real column "
+                "names (stats_bucket=0 turns the pane off)",
+                " and ".join(missing),
+            )
+
     def show(
         self,
         state: str = "state",
@@ -664,6 +701,7 @@ class ViewWidget:
                 _LOGGER.info("No data recorded yet; showing the declared columns.")
             self._selected_state = state
             self._selected_depth = self._resolve_depth(limit, full)
+            self._warn_stats_columns_locked()
             payload = self._build_payload_locked(
                 state, self._selected_depth, include_stats=True
             )
@@ -813,13 +851,20 @@ class ViewWidget:
         if bucket is None:
             if len(self._stats) >= _MAX_STATS_BUCKETS:
                 self._coarsen_stats_locked()
-            bucket = self._stats.setdefault(bucket_start, [0, 0, 0])
+            bucket = self._stats.setdefault(
+                bucket_start, [0, 0, 0, 0] if self._stats_custom else [0, 0, 0]
+            )
         bucket[0] += 1
         state = str(values[state_index])
         if state == self._stats_success:
             bucket[1] += 1
         elif state == self._stats_hang:
             bucket[2] += 1
+        # The custom value is counted independently of success/hang (separate
+        # ``if``), so pointing stats_custom= at an already-charted value
+        # simply mirrors that chart instead of silently recording zeros.
+        if self._stats_custom and state == self._stats_custom:
+            bucket[3] += 1
 
     def _coarsen_stats_locked(self) -> None:
         """Double the bucket width, pairwise-merging everything (cap guard).
@@ -836,7 +881,7 @@ class ViewWidget:
             if target is None:
                 merged[target_key] = bucket[:]
             else:
-                for index in range(3):
+                for index in range(len(bucket)):
                     target[index] += bucket[index]
         self._stats = merged
         self._stats_bucket = width
@@ -1009,13 +1054,21 @@ class ViewWidget:
         return payload
 
     def _build_stats_snapshot_locked(self) -> Dict[str, Any]:
-        """Serializable delay-bucket snapshot for the optional stats pane."""
+        """Serializable delay-bucket snapshot for the optional stats pane.
+
+        Buckets carry ``[lo, hi, total, ok, hang]`` (frozen §4.3 shape); when
+        ``stats_custom=`` is set, an additive 6th ``custom`` count rides along
+        and the snapshot gains a ``custom`` key — both only after the user
+        opted in, so uncustomized payloads stay byte-compatible.
+        """
         width = self._stats_bucket
+        custom = self._stats_custom
         buckets = [
             [key, key + width, bucket[0], bucket[1], bucket[2]]
+            + ([bucket[3]] if custom else [])
             for key, bucket in sorted(self._stats.items())
         ]
-        return {
+        snapshot = {
             "bucket": width,
             "bars": self._stats_bars,
             "success": self._stats_success,
@@ -1023,6 +1076,9 @@ class ViewWidget:
             "rows": sum(bucket[2] for bucket in buckets),
             "buckets": buckets,
         }
+        if custom:
+            snapshot["custom"] = custom
+        return snapshot
 
     def _build_live_snapshot(self) -> Optional[Dict[str, Any]]:
         """Latest state snapshot for the Syncer (contract 4.1/4.3)."""

@@ -80,8 +80,8 @@ vt.show()       # 立即显示自定义字段的空表；注入开始后自动�
 # 长时间实验建议改用 vt.show(replace=True)：重跑 cell / 多次 show 时
 # 自动关闭上一个面板，避免浏览器端面板累积占内存；close() 会一并回收。
 # ViewWidget(frame_delay=0.1) 可放宽前端推送合帧间隔（默认 0.05 s）。
-# ViewWidget(stats_bucket=100) 可打开 delay 分桶统计图（成功率 / HANG率，
-#   按概率从高到低排列），详见下文「Delay 统计面板」。
+# ViewWidget() 默认带右侧 delay 统计面板（桶宽 100；stats_bucket=0 关闭），
+#   详见下文「Delay 统计面板」。
 
 def attack():
     delay = random.randint(100, 2000)
@@ -152,34 +152,44 @@ vt = faultviz.ViewWidget(number_columns=["delay", "pulse", "voltage_mv"])
 
 传空列表则所有明细列都不使用绿色；`state`/`reply` 等字符串列始终为白色。
 
-### Delay 统计面板（可选，v0.3.0）
+### Delay 统计面板（默认开启，v0.5.0）
 
-`stats_bucket=` 打开明细窗右侧的统计面板：按 delay 分桶，实时显示两幅柱状图——
-**成功率**（命中 `stats_success` 状态的比例，默认 `PASS`）与 **HANG率**（默认 `HANG`），
-均按概率从高到低排列，桶标签如 `2700-2800`：
+明细窗右侧自带 delay 分桶统计面板：竖直柱状图按**象限布局**——
+**成功率**（左上，命中 `stats_success` 状态的比例，默认 `PASS`）与
+**HANG率**（左下，默认 `HANG`）共用左列，用户自定义的第三状态图（`stats_custom=`）
+独占右列：贴底与 HANG率 齐平，绘图区拉长一倍，柱色 `#4d33ff`（用户指定的 `#18097d`
+在暗色主题下偏暗，提亮为同系靛蓝；刷新即可改回）。
+横轴按 delay 时间轴从左到右递增（桶标签如 `500-600`、`600-700`…），柱子从基线向上生长，
+便于对照左右邻桶发现异常点；柱数超出上限时保留**最新一段**时间轴：
 
 ```python
-vt = faultviz.ViewWidget(
-    live_rows=1000,
-    stats_bucket=100,      # 每桶 100（delay 0-100、100-200…，0=关闭）
-    stats_interval=5,      # 每 5 帧推送一次统计，降低前端开销
-    stats_bars=12,         # 每幅图最多 12 根柱（按概率高→低）
-    stats_success="PASS",  # 记为“成功”的状态值
-    stats_hang="HANG",     # 记为“HANG”的状态值
-    stats_state="state",   # 分类列名（需为 str 列）
-    stats_delay="delay",   # 分桶列名（需为数值列）
-)
+vt = faultviz.ViewWidget()   # 统计面板默认开启，桶宽 100（delay 的最小单位）
+# 想指定桶宽就填这一个数；其他参数按需才调：
+#   stats_bucket=50,       # 换桶宽（0=关闭统计面板，完全回到旧界面）
+#   stats_custom="FAIL",   # 自定义第三状态图（右列整幅，贴底拉长，#4d33ff；默认不显示）
+#   stats_state="result",  # 分类列名（默认 state）
+#   stats_delay="ms",      # 分桶列名（默认 delay）
+#   stats_success="OK",    # 记为“成功”的状态值（默认 PASS）
+#   stats_hang="STUCK",    # 记为“HANG”的状态值（默认 HANG）
+#   stats_bars=20,         # 每幅图柱数（默认 30，最多 50）
+#   stats_interval=5,      # 每 5 帧推送一次统计
 ```
 
 行为说明：
 
 - **数据源是 CSV 本尊**：每条被接受的记录都会计入统计（与 `vt.rows_written` 一致），
   滚出显示窗口的旧行不会被遗忘；
-- **省内存/防卡顿**：图表节点池固定（每图 `stats_bars` 个常驻节点，只改文字与条宽）；
+- **省内存/防卡顿**：图表节点池固定（每图 `stats_bars` 个常驻节点，只改文字与柱高）；
   统计按 `stats_interval` 节流推送，`_build_payload_locked` 里不会每帧重算排序；
-- delay 非数值（或 state/delay 列不存在）的记录自动跳过；
+- 悬停任意柱条即时显示精确值标签（如 `2000-2100 · HANG 12/15 · 80.0%`）；
+  悬停标签是常驻节点，只在鼠标事件时定位/显隐，不参与实时分帧；
+- `stats_custom=` 是加法式扩展：设置后 payload 的桶行带第 6 个计数值并出现
+  `custom` 键（仅在你传入参数时）；计数独立于 success/hang（把 `stats_custom`
+  设为已图表化的值会得到一张完全镜像的图，而不是恒为 0）；
+- delay 非数值（或 state/delay 列不存在）的记录自动跳过；列名对不上时 show() 会出
+  一行 INFO 提示把 `stats_state=` / `stats_delay=` 指向真实列名；
 - 极端 delay 范围下桶数封顶 512，超限自动把桶宽翻倍合并（payload 会带新的桶宽）；
-- 关闭时（默认 `stats_bucket=0`）payload 完全不含 `stats`，界面与旧版一致。
+- `stats_bucket=0` 时 payload 完全不含 `stats`，界面与 FaultViz/0.3.x 完全一致。
 
 ### CSV-only 记录（不打开界面）
 
@@ -225,6 +235,8 @@ faultviz.csvplot(path)                                             # pygwalker �
 - 不再需要 JDK/`JAVA_HOME`，也没有 Deephaven 服务与端口占用；
 - 默认记录文件名为控件创建的起始时间（`YYYYMMDD-HHMMSS.csv`），并新增可选的 `columns=` 参数用于实例化时显式声明字段；
 - 明细窗默认只推送最近 200 行（`live_rows`/`limit`/`full` 可覆盖），避免大表渲染拖慢界面；
+- v0.4.0 起界面右侧**默认带一个 delay 统计面板**（桶宽默认 100；`stats_bucket=0`）
+  可整体关闭，关闭后 payload 与界面都回到 FaultViz 原观感；
 - `plot`/`csvplot` 的 pygwalker 为可选依赖。
 
 ## 数据与文件

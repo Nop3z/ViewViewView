@@ -68,7 +68,10 @@
 
 /* ---------------------------------------------------------------------
  * Optional third pane: delay statistics, shown as a horizontal band that
- * holds the detail pane (left) and the two bar charts (right).
+ * holds the detail pane (left) and two vertical bar charts (right). Each
+ * chart is a fixed 206px tall plot: 122px bar area (probability 0-100%,
+ * i.e. 0-122px) + 84px rotated timeline labels. Bars grow upward from the
+ * shared baseline; the x axis runs along the delay timeline ascending.
  * --------------------------------------------------------------------- */
 .vvv-band {
   display: flex;
@@ -81,15 +84,70 @@
   min-width: 96px;
 }
 
-/* Fixed-width charts pane; node count is constant, only texts/widths patch. */
+/* Fixed-width charts pane; node count is constant, only texts/heights patch.
+ * The right margin keeps the charts away from the screen edge (16:9 full
+ * browsers pin the widget against the monitor border otherwise). Plain
+ * mode is one column (成功率 / HANG率 stacked); with stats_custom= the pane
+ * widens into a 2×2 quadrant grid and the custom chart owns the right
+ * column (spans both rows). */
 .vvv-pane--stats {
   display: flex;
   flex: 0 0 272px;
   flex-direction: column;
   gap: 5px;
+  margin-right: 32px;
   overflow: hidden;
   padding: 8px 10px;
+  /* Anchor for the .vvv-stats-tip hover tag. */
+  position: relative;
 }
+
+.vvv-pane--stats-custom {
+  flex: 0 0 576px;
+}
+
+/* Quadrant layout: q2 = top-left (成功率), q3 = bottom-left (HANG率),
+ * custom = right column spanning both rows (第一/第四象限). */
+.vvv-stats-layout {
+  column-gap: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, auto));
+  row-gap: 6px;
+}
+
+/* Without stats_custom the grid degenerates to one stacked column. */
+.vvv-pane--stats:not(.vvv-pane--stats-custom) .vvv-stats-layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.vvv-stat-block {
+  min-width: 0;
+}
+
+.vvv-stat-block--q2 {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.vvv-stat-block--q3 {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.vvv-stat-block--custom {
+  display: flex;
+  flex-direction: column;
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  /* Title rides the top row (level with 成功率), the chart anchors to the
+   * bottom row so its baseline and labels sit flush with HANG率. */
+  justify-content: space-between;
+}
+
+/* The custom chart keeps its own doubled plot height (written inline by
+ * index.mjs, incl. its 50% gridline) so the user-defined state — often the
+ * majority across the whole timeline — gets stretched, readable bars. */
 
 .vvv-stats-title {
   align-items: baseline;
@@ -106,43 +164,53 @@
   font-weight: 400;
 }
 
-.vvv-stats-body {
+/* Plot: relative so the gridline/baseline overlays can anchor to it. */
+.vvv-stat-chart {
+  align-items: flex-end;
   display: flex;
-  flex-direction: column;
   flex: 0 0 auto;
-  gap: 3px;
+  gap: 2px;
+  height: 206px; /* STAT_PLOT_PX 122 + STAT_LABEL_PX 84 (index.mjs) */
+  min-width: 0;
+  position: relative;
 }
 
-.vvv-stat-row {
-  align-items: center;
+/* 50% reference line: sits 84px (labels) + 61px (half of the 122px plot)
+ * above the chart's bottom edge; must never intercept pointer events. */
+.vvv-stat-grid {
+  border-top: 1px dashed var(--vvv-border);
+  bottom: 145px;
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+}
+
+/* 0% baseline: top edge of the 84px label zone; never intercepts hover. */
+.vvv-stat-baseline {
+  border-top: 1px solid var(--vvv-border);
+  bottom: 84px;
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+}
+
+/* One bar = [fill (grows upward)] over [rotated label]. */
+.vvv-stat-col {
   display: flex;
-  gap: 6px;
-}
-
-.vvv-stat-label {
-  color: var(--vvv-fg-dim);
-  flex: 0 0 80px;
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-  overflow: hidden;
-  text-align: right;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.vvv-stat-track {
-  background: var(--vvv-header);
-  border-radius: 2px;
-  flex: 1 1 auto;
-  height: 10px;
-  overflow: hidden;
+  flex: 1 1 0;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-width: 0;
 }
 
 .vvv-stat-fill {
   background: var(--vvv-count);
-  border-radius: 2px;
-  height: 100%;
-  width: 0%;
+  border-radius: 2px 2px 0 0;
+  flex: 0 0 auto;
+  height: 0px;
+  width: 100%;
 }
 
 /* HANG率 bars share the warning red (palette has no red token yet). */
@@ -150,21 +218,51 @@
   background: #e05252;
 }
 
-.vvv-stat-value {
-  color: var(--vvv-fg);
-  flex: 0 0 46px;
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-  text-align: right;
+/* User-defined stats_custom state value: user-requested #18097d, lifted to
+ * #4d33ff so the bars stay clearly visible on the dark theme. */
+.vvv-stat-fill--custom {
+  background: #4d33ff;
 }
 
-.vvv-stats-divider {
-  border-top: 1px solid var(--vvv-border);
+/* Timeline labels read bottom-to-top in the 84px zone under the plot. */
+.vvv-stat-lab {
+  align-items: center;
+  color: var(--vvv-fg-dim);
+  display: flex;
+  flex: 0 0 84px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  justify-content: center;
+  overflow: hidden;
+  white-space: nowrap;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
 }
 
 .vvv-stats-note {
   color: var(--vvv-fg-dim);
   font-size: 10px;
+}
+
+/* Instant hover tag over a hovered bar (native title is too slow while
+ * scanning). One constant element per pane: positioned by index.mjs on
+ * mouseover, centred above the bar's top edge via the -50%/-100% shift. */
+.vvv-stats-tip {
+  background: var(--vvv-header);
+  border: 1px solid var(--vvv-border);
+  border-radius: 3px;
+  color: var(--vvv-fg);
+  display: none;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  left: 0;
+  padding: 3px 7px;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  transform: translate(-50%, -100%);
+  white-space: nowrap;
+  z-index: 5;
 }
 
 .vvv-table {
